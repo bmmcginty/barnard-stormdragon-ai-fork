@@ -158,6 +158,7 @@ func main() {
 		Config:     gumble.NewConfig(),
 		UserConfig: userConfig,
 		Address:    *server,
+		MutedChannels: make(map[uint32]bool),
 	}
 	b.Config.Buffers = *buffers
 

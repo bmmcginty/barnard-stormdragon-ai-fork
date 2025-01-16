@@ -6,11 +6,6 @@ import (
     "sort"
 )
 
-type TreeItem struct {
-    User    *gumble.User
-    Channel *gumble.Channel
-}
-
 func (ti TreeItem) String() string {
     if ti.User != nil {
         if ti.User.LocallyMuted {
@@ -32,9 +27,6 @@ func (ti TreeItem) TreeItemStyle(fg, bg uiterm.Attribute, active bool) (uiterm.A
         fg, bg = bg, fg
     }
     return fg, bg
-}
-
-func (b *Barnard) TreeItemCharacter(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm.TreeItem, ch rune) {
 }
 
 func (b *Barnard) changeVolume(users []*gumble.User, change float32) {
@@ -76,74 +68,6 @@ func makeUsersArray(users gumble.Users) []*gumble.User {
         t = append(t, u)
     }
     return t
-}
-
-func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm.TreeItem, key uiterm.Key) {
-    treeItem := item.(TreeItem)
-    if key == uiterm.KeyEnter {
-        if treeItem.Channel != nil {
-            b.Client.Self.Move(treeItem.Channel)
-            b.SetSelectedUser(nil)
-            b.GotoChat()
-        }
-        if treeItem.User != nil {
-            if b.selectedUser == treeItem.User {
-                b.SetSelectedUser(nil)
-                b.GotoChat()
-            } else {
-                b.SetSelectedUser(treeItem.User)
-                b.GotoChat()
-            }
-        }
-    }
-
-    // Handle mute toggle
-    if treeItem.Channel != nil {
-        if key == *b.Hotkeys.MuteToggle {
-            // Toggle mute for all users in channel
-            users := makeUsersArray(treeItem.Channel.Users)
-            for _, u := range users {
-                b.UserConfig.ToggleMute(u)
-                if u.AudioSource != nil {
-                    if u.LocallyMuted {
-                        u.AudioSource.SetGain(0)
-                    } else {
-                        u.AudioSource.SetGain(u.Volume)
-                    }
-                }
-            }
-            b.UiTree.Rebuild()
-            b.Ui.Refresh()
-        }
-        if key == *b.Hotkeys.VolumeDown {
-            b.changeVolume(makeUsersArray(treeItem.Channel.Users), -0.1)
-        }
-        if key == *b.Hotkeys.VolumeUp {
-            b.changeVolume(makeUsersArray(treeItem.Channel.Users), 0.1)
-        }
-    }
-
-    if treeItem.User != nil {
-        if key == *b.Hotkeys.MuteToggle {
-            // Toggle mute for single user
-            b.UserConfig.ToggleMute(treeItem.User)
-            if treeItem.User.AudioSource != nil {
-                if treeItem.User.LocallyMuted {
-                    treeItem.User.AudioSource.SetGain(0)
-                } else {
-                    treeItem.User.AudioSource.SetGain(treeItem.User.Volume)
-                }
-            }
-            b.UiTree.Rebuild()
-            b.Ui.Refresh()
-        }
-        if key == *b.Hotkeys.VolumeDown {
-            b.changeVolume([]*gumble.User{treeItem.User}, -0.1)
-        }
-        if key == *b.Hotkeys.VolumeUp {
-            b.changeVolume([]*gumble.User{treeItem.User}, 0.1)
-        }
-    }
 }
 
 func (b *Barnard) TreeItemBuild(item uiterm.TreeItem) []uiterm.TreeItem {
@@ -195,6 +119,12 @@ func (b *Barnard) TreeItemBuild(item uiterm.TreeItem) []uiterm.TreeItem {
         return cl[i].Name < cl[j].Name
     })
     for _, subchannel := range cl {
+        displayName := subchannel.Name
+        if b.MutedChannels[subchannel.ID] {
+            displayName = "[MUTED] #" + displayName
+        } else {
+            displayName = "#" + displayName
+        }
         channels = append(channels, TreeItem{
             Channel: subchannel,
         })
