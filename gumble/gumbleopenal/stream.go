@@ -164,7 +164,13 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
     go func(e *gumble.AudioStreamEvent) {
         var source = openal.NewSource()
         e.User.AudioSource = &source
-        e.User.AudioSource.SetGain(e.User.Volume)
+        
+        // Set initial gain based on volume and mute state
+        if e.User.LocallyMuted {
+            e.User.AudioSource.SetGain(0)
+        } else {
+            e.User.AudioSource.SetGain(e.User.Volume)
+        }
 
         bufferCount := e.Client.Config.Buffers
         if bufferCount < 64 {
@@ -183,6 +189,11 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
         var raw [maxBufferSize]byte
         
         for packet := range e.C {
+            // Skip processing if user is locally muted
+            if e.User.LocallyMuted {
+                continue
+            }
+
             var boost uint16 = uint16(1)
             samples := len(packet.AudioBuffer)
             if samples > cap(raw)/2 {
@@ -192,17 +203,13 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
             boost = e.User.Boost
 
             // Check if sample count suggests stereo data
-            // If it's not a multiple of 2, it must be mono
-            // If it's more than standard frameSize, it's likely stereo
             isStereo := samples > gumble.AudioDefaultFrameSize && samples%2 == 0
             format := openal.FormatMono16
             if isStereo {
                 format = openal.FormatStereo16
-                // Adjust samples to represent stereo frame count
                 samples = samples / 2
             }
 
-            // Process samples
             rawPtr := 0
             if isStereo {
                 // Process stereo samples as pairs
@@ -244,7 +251,6 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
             buffer := emptyBufs[last]
             emptyBufs = emptyBufs[:last]
 
-            // Set buffer data with correct format
             buffer.SetData(format, raw[:rawPtr], gumble.AudioSampleRate)
             source.QueueBuffer(buffer)
 
