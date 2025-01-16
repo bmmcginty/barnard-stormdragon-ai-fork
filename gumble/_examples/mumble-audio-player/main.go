@@ -1,4 +1,4 @@
-package main // import "git.2mb.codes/~cmb/barnard/gumble/_examples/mumble-audio-player"
+package main // import "git.stormux.org/storm/barnard/gumble/_examples/mumble-audio-player"
 
 import (
 	"flag"
@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"git.2mb.codes/~cmb/barnard/gumble/gumble"
-	"git.2mb.codes/~cmb/barnard/gumble/gumbleffmpeg"
-	"git.2mb.codes/~cmb/barnard/gumble/gumbleutil"
-	_ "git.2mb.codes/~cmb/barnard/gumble/opus"
+	"git.stormux.org/storm/barnard/gumble/gumble"
+	"git.stormux.org/storm/barnard/gumble/gumbleffmpeg"
+	"git.stormux.org/storm/barnard/gumble/gumbleutil"
+	_ "git.stormux.org/storm/barnard/gumble/opus"
 )
 
 func main() {

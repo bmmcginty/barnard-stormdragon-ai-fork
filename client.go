@@ -5,9 +5,9 @@ import (
 	"net"
 	"time"
 
-	"git.2mb.codes/~cmb/barnard/gumble/gumble"
-	"git.2mb.codes/~cmb/barnard/gumble/gumbleopenal"
-	"git.2mb.codes/~cmb/barnard/gumble/gumbleutil"
+	"git.stormux.org/storm/barnard/gumble/gumble"
+	"git.stormux.org/storm/barnard/gumble/gumbleopenal"
+	"git.stormux.org/storm/barnard/gumble/gumbleutil"
 )
 
 func (b *Barnard) start() {

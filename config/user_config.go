@@ -2,9 +2,9 @@ package config
 
 import (
     "fmt"
-    "git.2mb.codes/~cmb/barnard/uiterm"
+    "git.stormux.org/storm/barnard/uiterm"
     "gopkg.in/yaml.v2"
-    "git.2mb.codes/~cmb/barnard/gumble/gumble"
+    "git.stormux.org/storm/barnard/gumble/gumble"
     "io/ioutil"
     "os"
     "os/user"

@@ -6,8 +6,8 @@ import (
     "os/exec"
     "time"
 
-    "git.2mb.codes/~cmb/barnard/gumble/gumble"
-    "git.2mb.codes/~cmb/go-openal/openal"
+    "git.stormux.org/storm/barnard/gumble/gumble"
+    "git.stormux.org/storm/barnard/gumble/go-openal/openal"
 )
 
 const (

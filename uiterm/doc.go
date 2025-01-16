@@ -1,1 +1,1 @@
-package uiterm // import "git.2mb.codes/~cmb/barnard/uiterm"
+package uiterm // import "git.stormux.org/storm/barnard/uiterm"

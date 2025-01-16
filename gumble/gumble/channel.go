@@ -1,7 +1,7 @@
 package gumble
 
 import (
-	"git.2mb.codes/~cmb/barnard/gumble/gumble/MumbleProto"
+	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
 	"github.com/golang/protobuf/proto"
 )
 

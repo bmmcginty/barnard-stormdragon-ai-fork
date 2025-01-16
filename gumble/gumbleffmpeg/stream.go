@@ -1,4 +1,4 @@
-package gumbleffmpeg // import "git.2mb.codes/~cmb/barnard/gumble/gumbleffmpeg"
+package gumbleffmpeg // import "git.stormux.org/storm/barnard/gumble/gumbleffmpeg"
 
 import (
 	"encoding/binary"
@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"git.2mb.codes/~cmb/barnard/gumble/gumble"
+	"git.stormux.org/storm/barnard/gumble/gumble"
 )
 
 // State represents the state of a Stream.

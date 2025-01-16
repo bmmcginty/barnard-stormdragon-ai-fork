@@ -1,9 +1,10 @@
 package opus
 
 import (
-    "git.2mb.codes/~cmb/barnard/gumble/gumble"
-    "github.com/hraban/opus"
+    "git.stormux.org/storm/barnard/gumble/gumble"
+    "git.stormux.org/storm/barnard/gumble/go-opus"
 )
+
 
 var Codec gumble.AudioCodec
 

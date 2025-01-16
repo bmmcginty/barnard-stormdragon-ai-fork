@@ -3,7 +3,7 @@ package gumble
 import (
 	"strconv"
 
-	"git.2mb.codes/~cmb/barnard/gumble/gumble/MumbleProto"
+	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
 )
 
 // RejectType describes why a client connection was rejected by the server.

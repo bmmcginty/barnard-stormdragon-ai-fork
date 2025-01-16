@@ -1,4 +1,4 @@
-package varint // import "git.2mb.codes/~cmb/barnard/gumble/gumble/varint"
+package varint // import "git.stormux.org/storm/barnard/gumble/gumble/varint"
 
 import "testing"
 

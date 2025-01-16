@@ -28,7 +28,7 @@
 // for transmitting and receiving audio. It can be enabled by importing the
 // following package for its side effect:
 //  import (
-//      _ "git.2mb.codes/~cmb/barnard/gumble/opus"
+//      _ "git.stormux.org/storm/barnard/gumble/opus"
 //  )
 //
 // To ensure that gumble clients can always transmit and receive audio to and
@@ -42,4 +42,4 @@
 // (Users, Channels, Config, etc.), is thread-unsafe. Accessing or modifying
 // those structures should only be done from inside of an event listener or via
 // Client.Do.
-package gumble // import "git.2mb.codes/~cmb/barnard/gumble/gumble"
+package gumble // import "git.stormux.org/storm/barnard/gumble/gumble"

@@ -3,10 +3,10 @@ package main
 import (
 	"crypto/tls"
 
-	"git.2mb.codes/~cmb/barnard/config"
-	"git.2mb.codes/~cmb/barnard/gumble/gumble"
-	"git.2mb.codes/~cmb/barnard/gumble/gumbleopenal"
-	"git.2mb.codes/~cmb/barnard/uiterm"
+	"git.stormux.org/storm/barnard/config"
+	"git.stormux.org/storm/barnard/gumble/gumble"
+	"git.stormux.org/storm/barnard/gumble/gumbleopenal"
+	"git.stormux.org/storm/barnard/uiterm"
 )
 
 type Barnard struct {

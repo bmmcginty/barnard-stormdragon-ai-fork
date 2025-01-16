@@ -1,7 +1,7 @@
 package gumble
 
 import (
-	"git.2mb.codes/~cmb/barnard/gumble/gumble/MumbleProto"
+	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
 )
 
 // EventListener is the interface that must be implemented by a type if it

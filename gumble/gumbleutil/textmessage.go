@@ -1,11 +1,11 @@
-package gumbleutil // import "git.2mb.codes/~cmb/barnard/gumble/gumbleutil"
+package gumbleutil // import "git.stormux.org/storm/barnard/gumble/gumbleutil"
 
 import (
 	"bytes"
 	"encoding/xml"
 	"strings"
 
-	"git.2mb.codes/~cmb/barnard/gumble/gumble"
+	"git.stormux.org/storm/barnard/gumble/gumble"
 )
 
 // PlainText returns the Message string without HTML tags or entities.

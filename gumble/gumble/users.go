@@ -1,7 +1,7 @@
 package gumble
 
 import (
-//	"git.2mb.codes/~cmb/go-openal/openal"
+//	"git.stormux.org/storm/barnard/gumble/go-openal/openal"
 )
 
 // Users is a map of server users.

@@ -1,4 +1,4 @@
-package gumbleffmpeg // import "git.2mb.codes/~cmb/barnard/gumble/gumbleffmpeg"
+package gumbleffmpeg // import "git.stormux.org/storm/barnard/gumble/gumbleffmpeg"
 
 import (
 	"io"

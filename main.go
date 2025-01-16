@@ -16,12 +16,12 @@ import (
 	"crypto/tls"
 	"flag"
 	"github.com/alessio/shellescape"
-	"git.2mb.codes/~cmb/barnard/config"
+	"git.stormux.org/storm/barnard/config"
 
-	"git.2mb.codes/~cmb/barnard/gumble/gumble"
-	_ "git.2mb.codes/~cmb/barnard/gumble/opus"
-	"git.2mb.codes/~cmb/barnard/uiterm"
-	"git.2mb.codes/~cmb/go-openal/openal"
+	"git.stormux.org/storm/barnard/gumble/gumble"
+	_ "git.stormux.org/storm/barnard/gumble/opus"
+	"git.stormux.org/storm/barnard/uiterm"
+	"git.stormux.org/storm/barnard/gumble/go-openal/openal"
 )
 
 func show_devs(name string, args []string) {

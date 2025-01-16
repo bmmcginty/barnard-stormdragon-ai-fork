@@ -1,7 +1,7 @@
 package config
 
 import (
-    "git.2mb.codes/~cmb/barnard/uiterm"
+    "git.stormux.org/storm/barnard/uiterm"
 )
 
 type Hotkeys struct {

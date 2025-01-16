@@ -1,4 +1,4 @@
-package main // import "git.2mb.codes/~cmb/barnard/gumble/cmd/mumble-ping"
+package main // import "git.stormux.org/storm/barnard/gumble/cmd/mumble-ping"
 
 import (
 	"encoding/json"
@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"git.2mb.codes/~cmb/barnard/gumble/gumble"
+	"git.stormux.org/storm/barnard/gumble/gumble"
 )
 
 func main() {

@@ -1,8 +1,8 @@
 package main
 
 import (
-    "git.2mb.codes/~cmb/barnard/gumble/gumble"
-    "git.2mb.codes/~cmb/barnard/uiterm"
+    "git.stormux.org/storm/barnard/gumble/gumble"
+    "git.stormux.org/storm/barnard/uiterm"
     "sort"
 )
 

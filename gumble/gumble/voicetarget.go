@@ -1,7 +1,7 @@
 package gumble
 
 import (
-	"git.2mb.codes/~cmb/barnard/gumble/gumble/MumbleProto"
+	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
 )
 
 // VoiceTargetLoopback is a special voice target which causes any audio sent to

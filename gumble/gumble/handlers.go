@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"git.2mb.codes/~cmb/barnard/gumble/gumble/MumbleProto"
-	"git.2mb.codes/~cmb/barnard/gumble/gumble/varint"
+	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
+	"git.stormux.org/storm/barnard/gumble/gumble/varint"
 	"github.com/golang/protobuf/proto"
 )
 

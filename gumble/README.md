@@ -1,6 +1,6 @@
 # Note
 
-Added from git.2mb.codes/~cmb/barnard/gumble for ease of future work and development.
+Added from git.stormux.org/storm/barnard/gumble for ease of future work and development.
 
 # gumble
 
