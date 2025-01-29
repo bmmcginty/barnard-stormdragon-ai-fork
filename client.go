@@ -56,6 +56,9 @@ func (b *Barnard) connect(reconnect bool) bool {
 func (b *Barnard) OnConnect(e *gumble.ConnectEvent) {
     b.Client = e.Client
 
+    // Reset muted channels state on connect
+    b.MutedChannels = make(map[uint32]bool)
+
     b.Ui.SetActive(uiViewInput)
     b.UiTree.Rebuild()
     b.Ui.Refresh()
@@ -137,7 +140,7 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
     if e.User != nil {
         b.UserConfig.UpdateUser(e.User)
         
-        // New code: Check if user is joining a muted channel
+        // Check if user is joining a muted channel
         if e.Type.Has(gumble.UserChangeConnected) || e.Type.Has(gumble.UserChangeChannel) {
             // If the channel is muted, mute the new user
             if b.MutedChannels[e.User.Channel.ID] {
