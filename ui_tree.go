@@ -62,6 +62,23 @@ func (b *Barnard) changeVolume(users []*gumble.User, change float32) {
     b.UserConfig.SaveConfig()
 }
 
+func (b *Barnard) resetVolume(users []*gumble.User) {
+    for _, u := range users {
+        au := u.AudioSource
+        if au == nil {
+            continue
+        }
+        // Reset to original volume (1.0) and boost (1)
+        u.Boost = uint16(1)
+        u.Volume = 1.0
+        if !u.LocallyMuted {
+            au.SetGain(1.0)
+        }
+        b.UserConfig.UpdateConfig(u)
+    }
+    b.UserConfig.SaveConfig()
+}
+
 func makeUsersArray(users gumble.Users) []*gumble.User {
     t := make([]*gumble.User, 0, len(users))
     for _, u := range users {

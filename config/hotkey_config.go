@@ -8,6 +8,7 @@ type Hotkeys struct {
     Talk             *uiterm.Key
     VolumeDown       *uiterm.Key
     VolumeUp         *uiterm.Key
+    VolumeReset      *uiterm.Key
     MuteToggle       *uiterm.Key
     Exit             *uiterm.Key
     ToggleTimestamps *uiterm.Key

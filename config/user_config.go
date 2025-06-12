@@ -68,6 +68,7 @@ func (c *Config) LoadConfig() {
         Talk:             key(uiterm.KeyF1),
         VolumeDown:       key(uiterm.KeyF5),
         VolumeUp:         key(uiterm.KeyF6),
+        VolumeReset:      key(uiterm.KeyF8),
         MuteToggle:       key(uiterm.KeyF7),    // Added mute toggle hotkey
         Exit:             key(uiterm.KeyF10),
         ToggleTimestamps: key(uiterm.KeyF3),

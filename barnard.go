@@ -112,6 +112,9 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
         if key == *b.Hotkeys.VolumeUp {
             b.changeVolume(makeUsersArray(treeItem.Channel.Users), 0.1)
         }
+        if key == *b.Hotkeys.VolumeReset {
+            b.resetVolume(makeUsersArray(treeItem.Channel.Users))
+        }
     }
 
     if treeItem.User != nil {
@@ -133,6 +136,9 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
         }
         if key == *b.Hotkeys.VolumeUp {
             b.changeVolume([]*gumble.User{treeItem.User}, 0.1)
+        }
+        if key == *b.Hotkeys.VolumeReset {
+            b.resetVolume([]*gumble.User{treeItem.User})
         }
     }
 }
