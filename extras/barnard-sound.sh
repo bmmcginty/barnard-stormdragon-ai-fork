@@ -86,6 +86,18 @@ pm() {
     [[ $notify ]] && notify "$1 from $2: $3"
 }
 
+status() {
+    # If transmitting: Payphone coin drop tones (1700+2200 Hz simultaneous, like quarter = 5 tones)
+    # If not transmitting: Special Information Tone (SIT) - call failed (913.8, 1370.6, 1776.7 Hz)
+    if [[ "$3" == "transmitting" ]]; then
+        [[ $sound ]] && play -n synth .025 sin 1700 sin 2200 remix - norm -12 pad 0 .025 repeat 4
+        [[ $notify ]] && notify "You are transmitting."
+    else
+        [[ $sound ]] && play -n synth .250 sin 913.8 pad 0 .080 : synth .250 sin 1370.6 pad 0 .080 : synth .350 sin 1776.7 remix - norm -12
+        [[ $notify ]] && notify "You are not transmitting."
+    fi
+}
+
 if is_function "$1" ; then
     eval "$1" "$1" "$2" "$3" &> /dev/null
 else

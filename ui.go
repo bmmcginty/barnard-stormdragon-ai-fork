@@ -181,6 +181,14 @@ func (b *Barnard) CommandExit(ui *uiterm.Ui, cmd string) {
     b.Ui.Close()
 }
 
+func (b *Barnard) CommandStatus(ui *uiterm.Ui, cmd string) {
+    if b.Tx {
+        b.Notify("status", "me", "transmitting")
+    } else {
+        b.Notify("status", "me", "not transmitting")
+    }
+}
+
 func (b *Barnard) OnClearPress(ui *uiterm.Ui, key uiterm.Key) {
     b.UiOutput.Clear()
 }
@@ -283,6 +291,7 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
     b.Ui.AddCommandListener(b.CommandTalk, "toggle")
     b.Ui.AddCommandListener(b.CommandTalk, "talk")
     b.Ui.AddCommandListener(b.CommandExit, "exit")
+    b.Ui.AddCommandListener(b.CommandStatus, "status")
     b.Ui.AddKeyListener(b.OnFocusPress, b.Hotkeys.SwitchViews)
     b.Ui.AddKeyListener(b.OnVoiceToggle, b.Hotkeys.Talk)
     b.Ui.AddKeyListener(b.OnTimestampToggle, b.Hotkeys.ToggleTimestamps)
