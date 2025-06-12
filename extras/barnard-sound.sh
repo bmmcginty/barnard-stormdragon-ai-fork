@@ -93,7 +93,7 @@ status() {
         [[ $sound ]] && play -n synth .025 sin 1700 sin 2200 remix - norm -12 pad 0 .025 repeat 4
         [[ $notify ]] && notify "You are transmitting."
     else
-        [[ $sound ]] && play -n synth .250 sin 913.8 pad 0 .080 : synth .250 sin 1370.6 pad 0 .080 : synth .350 sin 1776.7 remix - norm -12
+        [[ $sound ]] && play -n synth .250 sin 913.8 pad 0 .050 norm -15 : synth .250 sin 1370.6 pad 0 .050 norm -15 : synth .350 sin 1776.7 remix - norm -15
         [[ $notify ]] && notify "You are not transmitting."
     fi
 }
