@@ -1,5 +1,12 @@
 # Barnard
 
+## Memorial (RIP Chris Brannon)
+
+The previous maintainer, Chris Brannon, passed away on June 13, 2025 at 11:31AM. He took over maintainership in 2021, and was solely responsible for keeping the project going. Due to health problems, he passed maintainership to me in early 2025.
+
+His other projects included work on edbrowse, he led a blind Linux and Unix users project, and he made countless contributions to the open source community. His brilliant work has helped people around the world, not just blind and low vision, but everyone. He will be deeply missed.
+
+
 ## Documentation
 
 Please feel free to give suggestions and corrections for this file (as wellas Barnard propper).
