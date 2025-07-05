@@ -79,10 +79,19 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
     // Handle mute toggle
     if treeItem.Channel != nil {
         if key == *b.Hotkeys.MuteToggle {
-            // Toggle mute for all users in channel
+            // Determine new channel mute state
+            channelWillBeMuted := !b.MutedChannels[treeItem.Channel.ID]
+            
+            // Set all users in channel to the same mute state
             users := makeUsersArray(treeItem.Channel.Users)
             for _, u := range users {
-                b.UserConfig.ToggleMute(u)
+                // Explicitly set user mute state to match channel state
+                if channelWillBeMuted && !u.LocallyMuted {
+                    b.UserConfig.ToggleMute(u)
+                } else if !channelWillBeMuted && u.LocallyMuted {
+                    b.UserConfig.ToggleMute(u)
+                }
+                
                 if u.AudioSource != nil {
                     if u.LocallyMuted {
                         u.AudioSource.SetGain(0)
@@ -92,15 +101,15 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
                 }
             }
 
-            // Toggle channel mute state
-            if b.MutedChannels[treeItem.Channel.ID] {
-                delete(b.MutedChannels, treeItem.Channel.ID)
-            } else {
+            // Update channel mute state
+            if channelWillBeMuted {
                 b.MutedChannels[treeItem.Channel.ID] = true
                 // If this is the current channel, stop transmission
                 if b.Client.Self.Channel.ID == treeItem.Channel.ID && b.Tx {
                     b.StopTransmission()
                 }
+            } else {
+                delete(b.MutedChannels, treeItem.Channel.ID)
             }
 
             b.UiTree.Rebuild()

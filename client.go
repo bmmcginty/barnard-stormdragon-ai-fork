@@ -142,9 +142,12 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
         
         // Check if user is joining a muted channel
         if e.Type.Has(gumble.UserChangeConnected) || e.Type.Has(gumble.UserChangeChannel) {
-            // If the channel is muted, mute the new user
+            // If the channel is muted, ensure the user is muted
             if b.MutedChannels[e.User.Channel.ID] {
-                b.UserConfig.ToggleMute(e.User)
+                // Only mute if not already muted
+                if !e.User.LocallyMuted {
+                    b.UserConfig.ToggleMute(e.User)
+                }
                 if e.User.AudioSource != nil {
                     e.User.AudioSource.SetGain(0)
                 }
