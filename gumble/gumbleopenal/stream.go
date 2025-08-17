@@ -10,6 +10,12 @@ import (
     "git.stormux.org/storm/barnard/gumble/go-openal/openal"
 )
 
+// NoiseProcessor interface for noise suppression
+type NoiseProcessor interface {
+    ProcessSamples(samples []int16)
+    IsEnabled() bool
+}
+
 const (
     maxBufferSize = 11520  // Max frame size (2880) * bytes per stereo sample (4)
 )
@@ -42,6 +48,8 @@ type Stream struct {
 
     deviceSink  *openal.Device
     contextSink *openal.Context
+    
+    noiseProcessor NoiseProcessor
 }
 
 func New(client *gumble.Client, inputDevice *string, outputDevice *string, test bool) (*Stream, error) {
@@ -95,6 +103,10 @@ func New(client *gumble.Client, inputDevice *string, outputDevice *string, test 
 
 func (s *Stream) AttachStream(client *gumble.Client) {
     s.link = client.Config.AttachAudio(s)
+}
+
+func (s *Stream) SetNoiseProcessor(np NoiseProcessor) {
+    s.noiseProcessor = np
 }
 
 func (s *Stream) Destroy() {
@@ -300,6 +312,12 @@ func (s *Stream) sourceRoutine(inputDevice *string) {
                 }
                 int16Buffer[i] = sample
             }
+            
+            // Apply noise suppression if available and enabled
+            if s.noiseProcessor != nil && s.noiseProcessor.IsEnabled() {
+                s.noiseProcessor.ProcessSamples(int16Buffer)
+            }
+            
             outgoing <- gumble.AudioBuffer(int16Buffer)
         }
     }

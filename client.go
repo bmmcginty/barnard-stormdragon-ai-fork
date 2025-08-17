@@ -49,6 +49,7 @@ func (b *Barnard) connect(reconnect bool) bool {
     }
     b.Stream = stream
     b.Stream.AttachStream(b.Client)
+    b.Stream.SetNoiseProcessor(b.NoiseSuppressor)
     b.Connected = true
     return true
 }

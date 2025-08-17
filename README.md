@@ -18,6 +18,30 @@ If a user is too soft to hear, you can boost their audio.
 The audio should drastically increase once you have hit the VolumeUp key over 10 times (from the silent/0 position).
 The boost setting is saved per user, just like per user volume.
 
+## Noise Suppression
+
+Barnard includes real-time noise suppression for microphone input to filter out background noise such as keyboard typing, computer fans, and other environmental sounds.
+
+### Features
+- **Real-time processing**: Noise suppression is applied during audio capture with minimal latency
+- **Configurable threshold**: Adjustable noise gate threshold (default: 0.02)
+- **Persistent settings**: Noise suppression preferences are saved in your configuration file
+- **Multiple control methods**: Toggle via hotkey, command line flag, or FIFO commands
+
+### Controls
+- **F9 key**: Toggle noise suppression on/off (configurable hotkey)
+- **Command line**: Use `--noise-suppression` flag to enable at startup
+- **FIFO command**: Send `noise` command to toggle during runtime
+- **Configuration**: Set `noisesuppressionenabled` and `noisesuppressionthreshold` in `~/.barnard.yaml`
+
+### Configuration Example
+```yaml
+noisesuppressionenabled: true
+noisesuppressionthreshold: 0.02
+```
+
+The noise suppression algorithm uses a combination of high-pass filtering and noise gating to reduce unwanted background sounds while preserving voice quality.
+
 ## FIFO Control
 
 If you pass the --fifo option to Barnard, a FIFO pipe will be created.
@@ -31,6 +55,7 @@ Current Commands:
 * micdown: Stop transmitting, just like when you release your talk key. Does nothing if you are not already transmitting.
 * toggle: Toggle your transmission state.
 * talk: Synonym for toggle.
+* noise: Toggle noise suppression on/off for microphone input.
 * exit: Exit Barnard, just like when you press your quit key.
 
 ## Event Notification
@@ -165,6 +190,7 @@ After running the command above, `barnard` will be compiled as `$(go env GOPATH)
 ### Key bindings
 
 - <kbd>F1</kbd>: toggle voice transmission
+- <kbd>F9</kbd>: toggle noise suppression
 - <kbd>Ctrl+L</kbd>: clear chat log
 - <kbd>Tab</kbd>: toggle focus between chat and user tree
 - <kbd>Page Up</kbd>: scroll chat up

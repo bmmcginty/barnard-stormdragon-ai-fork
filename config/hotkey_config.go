@@ -18,4 +18,5 @@ type Hotkeys struct {
     ScrollDown       *uiterm.Key
     ScrollToTop      *uiterm.Key
     ScrollToBottom   *uiterm.Key
+    NoiseSuppressionToggle *uiterm.Key
 }

@@ -17,6 +17,7 @@ import (
 	"flag"
 	"github.com/alessio/shellescape"
 	"git.stormux.org/storm/barnard/config"
+	"git.stormux.org/storm/barnard/noise"
 
 	"git.stormux.org/storm/barnard/gumble/gumble"
 	_ "git.stormux.org/storm/barnard/gumble/opus"
@@ -113,6 +114,7 @@ func main() {
 	usernameSet := false
 	buffers := flag.Int("buffers", 16, "number of audio buffers to use")
 	profile := flag.Bool("profile", false, "add http server to serve profiles")
+	noiseSuppressionEnabled := flag.Bool("noise-suppression", false, "enable noise suppression for microphone input")
 
 	flag.Parse()
 
@@ -159,11 +161,22 @@ func main() {
 		UserConfig: userConfig,
 		Address:    *server,
 		MutedChannels: make(map[uint32]bool),
+		NoiseSuppressor: noise.NewSuppressor(),
 	}
 	b.Config.Buffers = *buffers
 
 	b.Hotkeys = b.UserConfig.GetHotkeys()
 	b.UserConfig.SaveConfig()
+	
+	// Configure noise suppression
+	enabled := b.UserConfig.GetNoiseSuppressionEnabled()
+	if *noiseSuppressionEnabled {
+		enabled = true
+		b.UserConfig.SetNoiseSuppressionEnabled(true)
+	}
+	b.NoiseSuppressor.SetEnabled(enabled)
+	b.NoiseSuppressor.SetThreshold(b.UserConfig.GetNoiseSuppressionThreshold())
+	
 	b.Config.Username = *username
 	b.Config.Password = *password
 

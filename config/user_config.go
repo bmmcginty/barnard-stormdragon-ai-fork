@@ -26,6 +26,8 @@ type exportableConfig struct {
     DefaultServer *string
     Username      *string
     NotifyCommand *string
+    NoiseSuppressionEnabled    *bool
+    NoiseSuppressionThreshold *float32
 }
 
 type server struct {
@@ -75,6 +77,7 @@ func (c *Config) LoadConfig() {
         SwitchViews:      key(uiterm.KeyTab),
         ScrollUp:         key(uiterm.KeyPgup),
         ScrollDown:       key(uiterm.KeyPgdn),
+        NoiseSuppressionToggle: key(uiterm.KeyF9),
     }
     if fileExists(c.fn) {
         var data []byte
@@ -111,6 +114,14 @@ func (c *Config) LoadConfig() {
     if c.config.NotifyCommand == nil {
         ncmd := string("")
         jc.NotifyCommand = &ncmd
+    }
+    if c.config.NoiseSuppressionEnabled == nil {
+        enabled := false
+        jc.NoiseSuppressionEnabled = &enabled
+    }
+    if c.config.NoiseSuppressionThreshold == nil {
+        threshold := float32(0.02)
+        jc.NoiseSuppressionThreshold = &threshold
     }
 }
 
@@ -195,6 +206,30 @@ func (c *Config) GetDefaultServer() *string {
 
 func (c *Config) GetUsername() *string {
     return c.config.Username
+}
+
+func (c *Config) GetNoiseSuppressionEnabled() bool {
+    if c.config.NoiseSuppressionEnabled == nil {
+        return false
+    }
+    return *c.config.NoiseSuppressionEnabled
+}
+
+func (c *Config) SetNoiseSuppressionEnabled(enabled bool) {
+    c.config.NoiseSuppressionEnabled = &enabled
+    c.SaveConfig()
+}
+
+func (c *Config) GetNoiseSuppressionThreshold() float32 {
+    if c.config.NoiseSuppressionThreshold == nil {
+        return 0.02
+    }
+    return *c.config.NoiseSuppressionThreshold
+}
+
+func (c *Config) SetNoiseSuppressionThreshold(threshold float32) {
+    c.config.NoiseSuppressionThreshold = &threshold
+    c.SaveConfig()
 }
 
 func (c *Config) UpdateUser(u *gumble.User) {

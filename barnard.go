@@ -6,6 +6,7 @@ import (
     "git.stormux.org/storm/barnard/config"
     "git.stormux.org/storm/barnard/gumble/gumble"
     "git.stormux.org/storm/barnard/gumble/gumbleopenal"
+    "git.stormux.org/storm/barnard/noise"
     "git.stormux.org/storm/barnard/uiterm"
 )
 
@@ -43,6 +44,9 @@ type Barnard struct {
 
     // Added for channel muting
     MutedChannels map[uint32]bool
+    
+    // Added for noise suppression
+    NoiseSuppressor *noise.Suppressor
 }
 
 func (b *Barnard) StopTransmission() {

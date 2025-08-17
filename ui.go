@@ -95,6 +95,18 @@ func (b *Barnard) OnTimestampToggle(ui *uiterm.Ui, key uiterm.Key) {
     b.UiOutput.ToggleTimestamps()
 }
 
+func (b *Barnard) OnNoiseSuppressionToggle(ui *uiterm.Ui, key uiterm.Key) {
+    enabled := !b.UserConfig.GetNoiseSuppressionEnabled()
+    b.UserConfig.SetNoiseSuppressionEnabled(enabled)
+    b.NoiseSuppressor.SetEnabled(enabled)
+    
+    if enabled {
+        b.UpdateGeneralStatus("Noise suppression: ON", false)
+    } else {
+        b.UpdateGeneralStatus("Noise suppression: OFF", false)
+    }
+}
+
 func (b *Barnard) UpdateGeneralStatus(text string, notice bool) {
     if notice {
         b.UiStatus.Fg = uiterm.ColorWhite | uiterm.AttrBold
@@ -125,6 +137,18 @@ func (b *Barnard) CommandMicUp(ui *uiterm.Ui, cmd string) {
 
 func (b *Barnard) CommandMicDown(ui *uiterm.Ui, cmd string) {
     b.setTransmit(ui, 0)
+}
+
+func (b *Barnard) CommandNoiseSuppressionToggle(ui *uiterm.Ui, cmd string) {
+    enabled := !b.UserConfig.GetNoiseSuppressionEnabled()
+    b.UserConfig.SetNoiseSuppressionEnabled(enabled)
+    b.NoiseSuppressor.SetEnabled(enabled)
+    
+    if enabled {
+        b.AddOutputLine("Noise suppression enabled")
+    } else {
+        b.AddOutputLine("Noise suppression disabled")
+    }
 }
 
 func (b *Barnard) setTransmit(ui *uiterm.Ui, val int) {
@@ -292,9 +316,11 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
     b.Ui.AddCommandListener(b.CommandTalk, "talk")
     b.Ui.AddCommandListener(b.CommandExit, "exit")
     b.Ui.AddCommandListener(b.CommandStatus, "status")
+    b.Ui.AddCommandListener(b.CommandNoiseSuppressionToggle, "noise")
     b.Ui.AddKeyListener(b.OnFocusPress, b.Hotkeys.SwitchViews)
     b.Ui.AddKeyListener(b.OnVoiceToggle, b.Hotkeys.Talk)
     b.Ui.AddKeyListener(b.OnTimestampToggle, b.Hotkeys.ToggleTimestamps)
+    b.Ui.AddKeyListener(b.OnNoiseSuppressionToggle, b.Hotkeys.NoiseSuppressionToggle)
     b.Ui.AddKeyListener(b.OnQuitPress, b.Hotkeys.Exit)
     b.Ui.AddKeyListener(b.OnScrollOutputUp, b.Hotkeys.ScrollUp)
     b.Ui.AddKeyListener(b.OnScrollOutputDown, b.Hotkeys.ScrollDown)
