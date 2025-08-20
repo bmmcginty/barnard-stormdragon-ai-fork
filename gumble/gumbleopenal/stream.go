@@ -226,28 +226,49 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
             if isStereo {
                 // Process stereo samples as pairs
                 for i := 0; i < samples*2; i += 2 {
-                    // Process left channel
+                    // Process left channel with saturation protection
                     sample := packet.AudioBuffer[i]
                     if boost > 1 {
-                        sample = int16((int32(sample) * int32(boost)))
+                        boosted := int32(sample) * int32(boost)
+                        if boosted > 32767 {
+                            sample = 32767
+                        } else if boosted < -32767 {
+                            sample = -32767
+                        } else {
+                            sample = int16(boosted)
+                        }
                     }
                     binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
                     rawPtr += 2
 
-                    // Process right channel
+                    // Process right channel with saturation protection
                     sample = packet.AudioBuffer[i+1]
                     if boost > 1 {
-                        sample = int16((int32(sample) * int32(boost)))
+                        boosted := int32(sample) * int32(boost)
+                        if boosted > 32767 {
+                            sample = 32767
+                        } else if boosted < -32767 {
+                            sample = -32767
+                        } else {
+                            sample = int16(boosted)
+                        }
                     }
                     binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
                     rawPtr += 2
                 }
             } else {
-                // Process mono samples
+                // Process mono samples with saturation protection
                 for i := 0; i < samples; i++ {
                     sample := packet.AudioBuffer[i]
                     if boost > 1 {
-                        sample = int16((int32(sample) * int32(boost)))
+                        boosted := int32(sample) * int32(boost)
+                        if boosted > 32767 {
+                            sample = 32767
+                        } else if boosted < -32767 {
+                            sample = -32767
+                        } else {
+                            sample = int16(boosted)
+                        }
                     }
                     binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
                     rawPtr += 2

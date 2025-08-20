@@ -20,15 +20,23 @@ type Suppressor struct {
 	prevInput  float32
 	prevOutput float32
 	alpha      float32
+	
+	// Click detection state
+	clickThreshold    float32
+	clickDecay        float32
+	recentClickEnergy float32
 }
 
 // NewSuppressor creates a new noise suppressor
 func NewSuppressor() *Suppressor {
 	return &Suppressor{
-		enabled:    false,
-		threshold:  0.02,     // Noise threshold level
-		gainFactor: 0.8,      // Gain reduction for noise
-		alpha:      0.95,     // High-pass filter coefficient
+		enabled:           false,
+		threshold:         0.01,     // Reduced noise threshold level for less aggressive filtering
+		gainFactor:        0.9,      // Less aggressive gain reduction for noise
+		alpha:             0.98,     // More stable high-pass filter coefficient
+		clickThreshold:    0.15,     // Threshold for detecting keyboard clicks
+		clickDecay:        0.95,     // How quickly click energy decays
+		recentClickEnergy: 0.0,      // Tracks recent click activity
 	}
 }
 
@@ -60,7 +68,22 @@ func (s *Suppressor) ProcessSamples(samples []int16) {
 		return
 	}
 
-	// Simple noise suppression algorithm
+	// Calculate frame energy for click detection
+	var frameEnergy float32 = 0.0
+	for _, sample := range samples {
+		floatSample := float32(sample) / 32767.0
+		frameEnergy += floatSample * floatSample
+	}
+	frameEnergy = float32(math.Sqrt(float64(frameEnergy / float32(len(samples)))))
+	
+	// Detect sudden energy spikes (likely keyboard clicks)
+	energySpike := frameEnergy - s.recentClickEnergy
+	isClick := energySpike > s.clickThreshold && frameEnergy > 0.05
+	
+	// Update recent click energy with decay
+	s.recentClickEnergy = s.recentClickEnergy*s.clickDecay + frameEnergy*(1.0-s.clickDecay)
+	
+	// Improved noise suppression algorithm
 	for i, sample := range samples {
 		// Convert to float for processing
 		floatSample := float32(sample) / 32767.0
@@ -68,30 +91,35 @@ func (s *Suppressor) ProcessSamples(samples []int16) {
 		// Apply high-pass filter for DC removal
 		filtered := s.highPassFilter(floatSample)
 		
-		// Calculate signal strength
+		// Calculate signal strength (RMS-like)
 		strength := float32(math.Abs(float64(filtered)))
 		
-		// Apply noise gate
-		if strength < s.threshold {
-			// Below threshold - reduce gain
-			filtered *= s.gainFactor
+		// Apply noise gate with smooth transition
+		var gainReduction float32 = 1.0
+		
+		// If we detected a click, apply stronger suppression
+		if isClick {
+			gainReduction = s.gainFactor * 0.3 // Much stronger reduction for clicks
+		} else if strength < s.threshold {
+			// Normal noise gate for low-level sounds
+			gainReduction = strength / s.threshold
+			if gainReduction < s.gainFactor {
+				gainReduction = s.gainFactor
+			}
 		}
 		
-		// Apply simple spectral subtraction-like effect
-		// If signal is weak, reduce it further
-		if strength < s.threshold * 2 {
-			filtered *= (strength / (s.threshold * 2))
+		// Apply gain reduction
+		processed := filtered * gainReduction
+		
+		// Convert back to int16 with proper clipping
+		processedInt := processed * 32767.0
+		if processedInt > 32767 {
+			processedInt = 32767
+		} else if processedInt < -32767 {
+			processedInt = -32767
 		}
 		
-		// Convert back to int16
-		processed := filtered * 32767.0
-		if processed > 32767 {
-			processed = 32767
-		} else if processed < -32767 {
-			processed = -32767
-		}
-		
-		samples[i] = int16(processed)
+		samples[i] = int16(processedInt)
 	}
 }
 
