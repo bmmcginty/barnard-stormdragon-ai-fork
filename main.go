@@ -196,12 +196,12 @@ func main() {
 	if err != nil {
 		b.exitMessage = err.Error()
 		b.exitStatus = 1
-		handle_error(b)
+		handle_error(&b)
 	}
 	b.notifyChannel = setup_notify_runner(*b.UserConfig.GetNotifyCommand())
 	b.Ui = uiterm.New(&b)
 	b.Ui.Run(reader)
-	handle_error(b)
+	handle_error(&b)
 }
 
 func handle_raw_error(e error) {
@@ -209,7 +209,7 @@ func handle_raw_error(e error) {
 	os.Exit(1)
 }
 
-func handle_error(b Barnard) {
+func handle_error(b *Barnard) {
 	if b.exitMessage != "" {
 		fmt.Fprintf(os.Stderr, "%s\n", b.exitMessage)
 	}
