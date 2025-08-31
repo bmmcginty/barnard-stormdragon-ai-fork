@@ -107,6 +107,7 @@ func (b *Barnard) OnNoiseSuppressionToggle(ui *uiterm.Ui, key uiterm.Key) {
     }
 }
 
+
 func (b *Barnard) UpdateGeneralStatus(text string, notice bool) {
     if notice {
         b.UiStatus.Fg = uiterm.ColorWhite | uiterm.AttrBold
@@ -150,6 +151,7 @@ func (b *Barnard) CommandNoiseSuppressionToggle(ui *uiterm.Ui, cmd string) {
         b.AddOutputLine("Noise suppression disabled")
     }
 }
+
 
 func (b *Barnard) setTransmit(ui *uiterm.Ui, val int) {
     if b.Tx && val == 1 {

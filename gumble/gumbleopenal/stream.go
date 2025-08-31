@@ -6,6 +6,7 @@ import (
     "os/exec"
     "time"
 
+    "git.stormux.org/storm/barnard/audio"
     "git.stormux.org/storm/barnard/gumble/gumble"
     "git.stormux.org/storm/barnard/gumble/go-openal/openal"
 )
@@ -50,6 +51,7 @@ type Stream struct {
     contextSink *openal.Context
     
     noiseProcessor NoiseProcessor
+    micAGC         *audio.AGC
 }
 
 func New(client *gumble.Client, inputDevice *string, outputDevice *string, test bool) (*Stream, error) {
@@ -80,6 +82,7 @@ func New(client *gumble.Client, inputDevice *string, outputDevice *string, test 
         client:          client,
         sourceFrameSize: frmsz,
         micVolume:      1.0,
+        micAGC:         audio.NewAGC(), // Always enable AGC for outgoing mic
     }
 
     s.deviceSource = idev
@@ -108,6 +111,7 @@ func (s *Stream) AttachStream(client *gumble.Client) {
 func (s *Stream) SetNoiseProcessor(np NoiseProcessor) {
     s.noiseProcessor = np
 }
+
 
 func (s *Stream) Destroy() {
     if s.link != nil {
@@ -337,6 +341,11 @@ func (s *Stream) sourceRoutine(inputDevice *string) {
             // Apply noise suppression if available and enabled
             if s.noiseProcessor != nil && s.noiseProcessor.IsEnabled() {
                 s.noiseProcessor.ProcessSamples(int16Buffer)
+            }
+            
+            // Apply AGC to outgoing microphone audio (always enabled)
+            if s.micAGC != nil {
+                s.micAGC.ProcessSamples(int16Buffer)
             }
             
             outgoing <- gumble.AudioBuffer(int16Buffer)
