@@ -28,6 +28,7 @@ type exportableConfig struct {
     NotifyCommand *string
     NoiseSuppressionEnabled    *bool
     NoiseSuppressionThreshold *float32
+    VoiceEffect   *int
 }
 
 type server struct {
@@ -78,6 +79,7 @@ func (c *Config) LoadConfig() {
         ScrollUp:         key(uiterm.KeyPgup),
         ScrollDown:       key(uiterm.KeyPgdn),
         NoiseSuppressionToggle: key(uiterm.KeyF9),
+        CycleVoiceEffect: key(uiterm.KeyF12),
     }
     if fileExists(c.fn) {
         var data []byte
@@ -122,6 +124,10 @@ func (c *Config) LoadConfig() {
     if c.config.NoiseSuppressionThreshold == nil {
         threshold := float32(0.02)
         jc.NoiseSuppressionThreshold = &threshold
+    }
+    if c.config.VoiceEffect == nil {
+        effect := 0 // Default to EffectNone
+        jc.VoiceEffect = &effect
     }
 }
 
@@ -229,6 +235,18 @@ func (c *Config) GetNoiseSuppressionThreshold() float32 {
 
 func (c *Config) SetNoiseSuppressionThreshold(threshold float32) {
     c.config.NoiseSuppressionThreshold = &threshold
+    c.SaveConfig()
+}
+
+func (c *Config) GetVoiceEffect() int {
+    if c.config.VoiceEffect == nil {
+        return 0
+    }
+    return *c.config.VoiceEffect
+}
+
+func (c *Config) SetVoiceEffect(effect int) {
+    c.config.VoiceEffect = &effect
     c.SaveConfig()
 }
 

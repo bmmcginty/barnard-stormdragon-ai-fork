@@ -16,6 +16,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"github.com/alessio/shellescape"
+	"git.stormux.org/storm/barnard/audio"
 	"git.stormux.org/storm/barnard/config"
 	"git.stormux.org/storm/barnard/noise"
 
@@ -162,6 +163,7 @@ func main() {
 		Address:    *server,
 		MutedChannels: make(map[uint32]bool),
 		NoiseSuppressor: noise.NewSuppressor(),
+		VoiceEffects: audio.NewEffectsProcessor(gumble.AudioSampleRate),
 	}
 	b.Config.Buffers = *buffers
 
@@ -176,7 +178,10 @@ func main() {
 	}
 	b.NoiseSuppressor.SetEnabled(enabled)
 	b.NoiseSuppressor.SetThreshold(b.UserConfig.GetNoiseSuppressionThreshold())
-	
+
+	// Configure voice effects
+	b.VoiceEffects.SetEffect(audio.VoiceEffect(b.UserConfig.GetVoiceEffect()))
+
 	b.Config.Username = *username
 	b.Config.Password = *password
 

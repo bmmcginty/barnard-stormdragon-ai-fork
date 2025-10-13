@@ -3,6 +3,7 @@ package main
 import (
     "crypto/tls"
 
+    "git.stormux.org/storm/barnard/audio"
     "git.stormux.org/storm/barnard/config"
     "git.stormux.org/storm/barnard/gumble/gumble"
     "git.stormux.org/storm/barnard/gumble/gumbleopenal"
@@ -44,9 +45,12 @@ type Barnard struct {
 
     // Added for channel muting
     MutedChannels map[uint32]bool
-    
+
     // Added for noise suppression
     NoiseSuppressor *noise.Suppressor
+
+    // Added for voice effects
+    VoiceEffects *audio.EffectsProcessor
 }
 
 func (b *Barnard) StopTransmission() {

@@ -99,12 +99,18 @@ func (b *Barnard) OnNoiseSuppressionToggle(ui *uiterm.Ui, key uiterm.Key) {
     enabled := !b.UserConfig.GetNoiseSuppressionEnabled()
     b.UserConfig.SetNoiseSuppressionEnabled(enabled)
     b.NoiseSuppressor.SetEnabled(enabled)
-    
+
     if enabled {
         b.UpdateGeneralStatus("Noise suppression: ON", false)
     } else {
         b.UpdateGeneralStatus("Noise suppression: OFF", false)
     }
+}
+
+func (b *Barnard) OnVoiceEffectCycle(ui *uiterm.Ui, key uiterm.Key) {
+    effect := b.VoiceEffects.CycleEffect()
+    b.UserConfig.SetVoiceEffect(int(effect))
+    b.UpdateGeneralStatus(fmt.Sprintf("Voice effect: %s", effect.String()), false)
 }
 
 
@@ -323,6 +329,7 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
     b.Ui.AddKeyListener(b.OnVoiceToggle, b.Hotkeys.Talk)
     b.Ui.AddKeyListener(b.OnTimestampToggle, b.Hotkeys.ToggleTimestamps)
     b.Ui.AddKeyListener(b.OnNoiseSuppressionToggle, b.Hotkeys.NoiseSuppressionToggle)
+    b.Ui.AddKeyListener(b.OnVoiceEffectCycle, b.Hotkeys.CycleVoiceEffect)
     b.Ui.AddKeyListener(b.OnQuitPress, b.Hotkeys.Exit)
     b.Ui.AddKeyListener(b.OnScrollOutputUp, b.Hotkeys.ScrollUp)
     b.Ui.AddKeyListener(b.OnScrollOutputDown, b.Hotkeys.ScrollDown)

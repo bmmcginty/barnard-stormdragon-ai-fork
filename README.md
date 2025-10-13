@@ -18,6 +18,26 @@ If a user is too soft to hear, you can boost their audio.
 The audio should drastically increase once you have hit the VolumeUp key over 10 times (from the silent/0 position).
 The boost setting is saved per user, just like per user volume.
 
+## Voice Effects
+
+Barnard includes real-time voice effects that can be applied to your outgoing microphone audio. Press F12 to cycle through the available effects.
+
+### Available Effects
+- **None**: No effect applied (default)
+- **Echo**: Single repeating delay effect with feedback (250ms) - creates distinct repetitions that fade away
+- **Reverb**: Multiple short delays (12.5ms, 20ms, 33ms) without feedback - adds thickness and fullness to your voice
+- **High Pitch**: Chipmunk-style voice using pitch shifting
+- **Low Pitch**: Deep voice using pitch shifting
+- **Robot**: Ring modulation effect for robotic sound
+- **Chorus**: Layered voices with slight pitch variations for a rich, ensemble sound
+
+### Controls
+- **F12 key**: Cycle through voice effects (configurable hotkey)
+- **Configuration**: Your selected effect is saved in `~/.barnard.yaml`
+
+### How It Works
+Voice effects are applied to your outgoing audio in real-time, after noise suppression and automatic gain control. The effects use various digital signal processing techniques including delay lines, pitch shifting with cubic interpolation, and ring modulation.
+
 ## Noise Suppression
 
 Barnard includes real-time noise suppression for microphone input to filter out background noise such as keyboard typing, computer fans, and other environmental sounds.
@@ -191,6 +211,7 @@ After running the command above, `barnard` will be compiled as `$(go env GOPATH)
 
 - <kbd>F1</kbd>: toggle voice transmission
 - <kbd>F9</kbd>: toggle noise suppression
+- <kbd>F12</kbd>: cycle through voice effects
 - <kbd>Ctrl+L</kbd>: clear chat log
 - <kbd>Tab</kbd>: toggle focus between chat and user tree
 - <kbd>Page Up</kbd>: scroll chat up

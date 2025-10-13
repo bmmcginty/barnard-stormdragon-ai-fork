@@ -19,4 +19,5 @@ type Hotkeys struct {
     ScrollToTop      *uiterm.Key
     ScrollToBottom   *uiterm.Key
     NoiseSuppressionToggle *uiterm.Key
+    CycleVoiceEffect *uiterm.Key
 }

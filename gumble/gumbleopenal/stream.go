@@ -17,6 +17,12 @@ type NoiseProcessor interface {
     IsEnabled() bool
 }
 
+// EffectsProcessor interface for voice effects
+type EffectsProcessor interface {
+    ProcessSamples(samples []int16)
+    IsEnabled() bool
+}
+
 const (
     maxBufferSize = 11520  // Max frame size (2880) * bytes per stereo sample (4)
 )
@@ -49,9 +55,10 @@ type Stream struct {
 
     deviceSink  *openal.Device
     contextSink *openal.Context
-    
-    noiseProcessor NoiseProcessor
-    micAGC         *audio.AGC
+
+    noiseProcessor   NoiseProcessor
+    micAGC           *audio.AGC
+    effectsProcessor EffectsProcessor
 }
 
 func New(client *gumble.Client, inputDevice *string, outputDevice *string, test bool) (*Stream, error) {
@@ -110,6 +117,14 @@ func (s *Stream) AttachStream(client *gumble.Client) {
 
 func (s *Stream) SetNoiseProcessor(np NoiseProcessor) {
     s.noiseProcessor = np
+}
+
+func (s *Stream) SetEffectsProcessor(ep EffectsProcessor) {
+    s.effectsProcessor = ep
+}
+
+func (s *Stream) GetEffectsProcessor() EffectsProcessor {
+    return s.effectsProcessor
 }
 
 
@@ -342,12 +357,17 @@ func (s *Stream) sourceRoutine(inputDevice *string) {
             if s.noiseProcessor != nil && s.noiseProcessor.IsEnabled() {
                 s.noiseProcessor.ProcessSamples(int16Buffer)
             }
-            
+
             // Apply AGC to outgoing microphone audio (always enabled)
             if s.micAGC != nil {
                 s.micAGC.ProcessSamples(int16Buffer)
             }
-            
+
+            // Apply voice effects if available and enabled
+            if s.effectsProcessor != nil && s.effectsProcessor.IsEnabled() {
+                s.effectsProcessor.ProcessSamples(int16Buffer)
+            }
+
             outgoing <- gumble.AudioBuffer(int16Buffer)
         }
     }
