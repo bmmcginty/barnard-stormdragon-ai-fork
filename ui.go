@@ -71,7 +71,7 @@ func (b *Barnard) UpdateInputStatus(status string) {
 
 func (b *Barnard) AddOutputLine(line string) {
     now := time.Now()
-    b.UiOutput.AddLine(fmt.Sprintf("[%02d:%02d:%02d] %s", now.Hour(), now.Minute(), now.Second(), line))
+    b.UiOutput.AddLine(fmt.Sprintf("%s [%02d:%02d:%02d]", line, now.Hour(), now.Minute(), now.Second()))
 }
 
 func (b *Barnard) AddOutputMessage(sender *gumble.User, message string) {
