@@ -2,7 +2,7 @@ package main
 
 import (
     "fmt"
-    "github.com/nsf/termbox-go"
+    "os"
     "os/exec"
     "strings"
     "time"
@@ -10,6 +10,7 @@ import (
     "git.stormux.org/storm/barnard/gumble/gumble"
     "git.stormux.org/storm/barnard/uiterm"
     "github.com/kennygrant/sanitize"
+    "github.com/nsf/termbox-go"
 )
 
 const (
@@ -150,12 +151,107 @@ func (b *Barnard) CommandNoiseSuppressionToggle(ui *uiterm.Ui, cmd string) {
     enabled := !b.UserConfig.GetNoiseSuppressionEnabled()
     b.UserConfig.SetNoiseSuppressionEnabled(enabled)
     b.NoiseSuppressor.SetEnabled(enabled)
-    
+
     if enabled {
         b.AddOutputLine("Noise suppression enabled")
     } else {
         b.AddOutputLine("Noise suppression disabled")
     }
+}
+
+func (b *Barnard) CommandPlayFile(ui *uiterm.Ui, cmd string) {
+    // cmd contains just the filename part (everything after "/file ")
+    filename := strings.TrimSpace(cmd)
+    if filename == "" {
+        b.AddOutputLine("Usage: /file <filename or URL>")
+        return
+    }
+
+    // Check if it's a URL
+    isURL := strings.HasPrefix(filename, "http://") ||
+             strings.HasPrefix(filename, "https://") ||
+             strings.HasPrefix(filename, "ftp://") ||
+             strings.HasPrefix(filename, "rtmp://")
+
+    if !isURL {
+        // Expand ~ to home directory for local files
+        if strings.HasPrefix(filename, "~") {
+            homeDir := os.Getenv("HOME")
+            filename = strings.Replace(filename, "~", homeDir, 1)
+        }
+
+        // Check if local file exists
+        if _, err := os.Stat(filename); os.IsNotExist(err) {
+            b.AddOutputLine(fmt.Sprintf("File not found: %s", filename))
+            return
+        }
+    }
+
+    if !b.Connected {
+        b.AddOutputLine("Not connected to server")
+        return
+    }
+
+    b.FileStreamMutex.Lock()
+    defer b.FileStreamMutex.Unlock()
+
+    if b.FileStream != nil && b.FileStream.IsPlaying() {
+        b.AddOutputLine("Already playing a file. Use /stop first.")
+        return
+    }
+
+    err := b.FileStream.PlayFile(filename)
+    if err != nil {
+        b.AddOutputLine(fmt.Sprintf("Error playing file: %s", err.Error()))
+        return
+    }
+
+    // Enable stereo encoder for file playback
+    b.Client.EnableStereoEncoder()
+
+    // Auto-start transmission if not already transmitting
+    if !b.Tx {
+        err := b.Stream.StartSource(b.UserConfig.GetInputDevice())
+        if err != nil {
+            b.AddOutputLine(fmt.Sprintf("Error starting transmission: %s", err.Error()))
+            b.FileStream.Stop()
+            b.Client.DisableStereoEncoder()
+            return
+        }
+        b.Tx = true
+        b.UpdateGeneralStatus(" File ", true)
+    }
+
+    if isURL {
+        b.AddOutputLine(fmt.Sprintf("Streaming: %s (stereo)", filename))
+    } else {
+        b.AddOutputLine(fmt.Sprintf("Playing: %s (stereo)", filename))
+    }
+}
+
+func (b *Barnard) CommandStopFile(ui *uiterm.Ui, cmd string) {
+    b.FileStreamMutex.Lock()
+    defer b.FileStreamMutex.Unlock()
+
+    if b.FileStream == nil || !b.FileStream.IsPlaying() {
+        b.AddOutputLine("No file playing")
+        return
+    }
+
+    err := b.FileStream.Stop()
+    if err != nil {
+        b.AddOutputLine(fmt.Sprintf("Error stopping file: %s", err.Error()))
+        return
+    }
+
+    // Disable stereo encoder when file stops
+    b.Client.DisableStereoEncoder()
+
+    b.AddOutputLine("File playback stopped")
+
+    // Note: We keep transmission active even after file stops
+    // User can manually stop with talk key or it will stop when they're done talking
+    b.UpdateGeneralStatus(" Idle ", false)
 }
 
 
@@ -257,6 +353,43 @@ func (b *Barnard) OnTextInput(ui *uiterm.Ui, textbox *uiterm.Textbox, text strin
     if text == "" {
         return
     }
+
+    // Check if this is a command (starts with /)
+    if strings.HasPrefix(text, "/") {
+        // Remove the leading slash and process as command
+        cmdText := strings.TrimPrefix(text, "/")
+        parts := strings.SplitN(cmdText, " ", 2)
+        cmdName := parts[0]
+        cmdArgs := ""
+        if len(parts) > 1 {
+            cmdArgs = parts[1]
+        }
+
+        // Handle built-in commands
+        switch cmdName {
+        case "file":
+            b.CommandPlayFile(ui, cmdArgs)
+        case "stop":
+            b.CommandStopFile(ui, cmdArgs)
+        case "exit":
+            b.CommandExit(ui, cmdArgs)
+        case "status":
+            b.CommandStatus(ui, cmdArgs)
+        case "noise":
+            b.CommandNoiseSuppressionToggle(ui, cmdArgs)
+        case "micup":
+            b.CommandMicUp(ui, cmdArgs)
+        case "micdown":
+            b.CommandMicDown(ui, cmdArgs)
+        case "toggle", "talk":
+            b.CommandTalk(ui, cmdArgs)
+        default:
+            b.AddOutputLine(fmt.Sprintf("Unknown command: /%s", cmdName))
+        }
+        return
+    }
+
+    // Not a command, send as chat message
     if b.Client != nil && b.Client.Self != nil {
         if b.selectedUser != nil {
             b.selectedUser.Send(text)
@@ -325,6 +458,8 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
     b.Ui.AddCommandListener(b.CommandExit, "exit")
     b.Ui.AddCommandListener(b.CommandStatus, "status")
     b.Ui.AddCommandListener(b.CommandNoiseSuppressionToggle, "noise")
+    b.Ui.AddCommandListener(b.CommandPlayFile, "file")
+    b.Ui.AddCommandListener(b.CommandStopFile, "stop")
     b.Ui.AddKeyListener(b.OnFocusPress, b.Hotkeys.SwitchViews)
     b.Ui.AddKeyListener(b.OnVoiceToggle, b.Hotkeys.Talk)
     b.Ui.AddKeyListener(b.OnTimestampToggle, b.Hotkeys.ToggleTimestamps)

@@ -5,9 +5,11 @@ import (
     "net"
     "time"
 
+    "git.stormux.org/storm/barnard/fileplayback"
     "git.stormux.org/storm/barnard/gumble/gumble"
     "git.stormux.org/storm/barnard/gumble/gumbleopenal"
     "git.stormux.org/storm/barnard/gumble/gumbleutil"
+    "git.stormux.org/storm/barnard/gumble/opus"
 )
 
 func (b *Barnard) start() {
@@ -51,6 +53,21 @@ func (b *Barnard) connect(reconnect bool) bool {
     b.Stream.AttachStream(b.Client)
     b.Stream.SetNoiseProcessor(b.NoiseSuppressor)
     b.Stream.SetEffectsProcessor(b.VoiceEffects)
+
+    // Initialize stereo encoder for file playback
+    b.Client.AudioEncoderStereo = opus.NewStereoEncoder()
+
+    // Initialize file player
+    b.FileStreamMutex.Lock()
+    b.FileStream = fileplayback.New(b.Client)
+    b.FileStream.SetErrorFunc(func(err error) {
+        // Disable stereo when file finishes or errors
+        b.Client.DisableStereoEncoder()
+        b.AddOutputLine(fmt.Sprintf("File playback: %s", err.Error()))
+    })
+    b.Stream.SetFilePlayer(b.FileStream)
+    b.FileStreamMutex.Unlock()
+
     b.Connected = true
     return true
 }

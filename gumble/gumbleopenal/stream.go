@@ -23,6 +23,12 @@ type EffectsProcessor interface {
     IsEnabled() bool
 }
 
+// FilePlayer interface for file playback
+type FilePlayer interface {
+    GetAudioFrame() []int16
+    IsPlaying() bool
+}
+
 const (
     maxBufferSize = 11520  // Max frame size (2880) * bytes per stereo sample (4)
 )
@@ -59,6 +65,7 @@ type Stream struct {
     noiseProcessor   NoiseProcessor
     micAGC           *audio.AGC
     effectsProcessor EffectsProcessor
+    filePlayer       FilePlayer
 }
 
 func New(client *gumble.Client, inputDevice *string, outputDevice *string, test bool) (*Stream, error) {
@@ -125,6 +132,14 @@ func (s *Stream) SetEffectsProcessor(ep EffectsProcessor) {
 
 func (s *Stream) GetEffectsProcessor() EffectsProcessor {
     return s.effectsProcessor
+}
+
+func (s *Stream) SetFilePlayer(fp FilePlayer) {
+    s.filePlayer = fp
+}
+
+func (s *Stream) GetFilePlayer() FilePlayer {
+    return s.filePlayer
 }
 
 
@@ -340,35 +355,88 @@ func (s *Stream) sourceRoutine(inputDevice *string) {
         case <-stop:
             return
         case <-ticker.C:
-            buff := s.deviceSource.CaptureSamples(uint32(frameSize))
-            if len(buff) != frameSize*2 {
-                continue
-            }
+            // Initialize buffer with silence
             int16Buffer := make([]int16, frameSize)
-            for i := range int16Buffer {
-                sample := int16(binary.LittleEndian.Uint16(buff[i*2:]))
-                if s.micVolume != 1.0 {
-                    sample = int16(float32(sample) * s.micVolume)
+
+            // Capture microphone if available
+            hasMicInput := false
+            buff := s.deviceSource.CaptureSamples(uint32(frameSize))
+            if len(buff) == frameSize*2 {
+                hasMicInput = true
+                for i := range int16Buffer {
+                    sample := int16(binary.LittleEndian.Uint16(buff[i*2:]))
+                    if s.micVolume != 1.0 {
+                        sample = int16(float32(sample) * s.micVolume)
+                    }
+                    int16Buffer[i] = sample
                 }
-                int16Buffer[i] = sample
-            }
-            
-            // Apply noise suppression if available and enabled
-            if s.noiseProcessor != nil && s.noiseProcessor.IsEnabled() {
-                s.noiseProcessor.ProcessSamples(int16Buffer)
+
+                // Apply noise suppression if available and enabled
+                if s.noiseProcessor != nil && s.noiseProcessor.IsEnabled() {
+                    s.noiseProcessor.ProcessSamples(int16Buffer)
+                }
+
+                // Apply AGC to outgoing microphone audio (always enabled)
+                if s.micAGC != nil {
+                    s.micAGC.ProcessSamples(int16Buffer)
+                }
+
+                // Apply voice effects if available and enabled
+                if s.effectsProcessor != nil && s.effectsProcessor.IsEnabled() {
+                    s.effectsProcessor.ProcessSamples(int16Buffer)
+                }
             }
 
-            // Apply AGC to outgoing microphone audio (always enabled)
-            if s.micAGC != nil {
-                s.micAGC.ProcessSamples(int16Buffer)
+            // Mix with or use file audio if playing
+            hasFileAudio := false
+            var outputBuffer []int16
+
+            if s.filePlayer != nil && s.filePlayer.IsPlaying() {
+                fileAudio := s.filePlayer.GetAudioFrame()
+                if fileAudio != nil && len(fileAudio) > 0 {
+                    hasFileAudio = true
+                    // File audio is stereo - send as stereo when file is playing
+                    // Create stereo buffer (frameSize * 2 channels)
+                    outputBuffer = make([]int16, frameSize*2)
+
+                    if hasMicInput {
+                        // Mix mono mic with stereo file
+                        for i := 0; i < frameSize; i++ {
+                            if i*2+1 < len(fileAudio) {
+                                // Left channel: mic + file left
+                                left := int32(int16Buffer[i]) + int32(fileAudio[i*2])
+                                if left > 32767 {
+                                    left = 32767
+                                } else if left < -32768 {
+                                    left = -32768
+                                }
+                                outputBuffer[i*2] = int16(left)
+
+                                // Right channel: mic + file right
+                                right := int32(int16Buffer[i]) + int32(fileAudio[i*2+1])
+                                if right > 32767 {
+                                    right = 32767
+                                } else if right < -32768 {
+                                    right = -32768
+                                }
+                                outputBuffer[i*2+1] = int16(right)
+                            }
+                        }
+                    } else {
+                        // Use file audio only (already stereo)
+                        copy(outputBuffer, fileAudio[:frameSize*2])
+                    }
+                }
             }
 
-            // Apply voice effects if available and enabled
-            if s.effectsProcessor != nil && s.effectsProcessor.IsEnabled() {
-                s.effectsProcessor.ProcessSamples(int16Buffer)
+            // Determine what to send
+            if hasFileAudio {
+                // Send stereo buffer when file is playing
+                outgoing <- gumble.AudioBuffer(outputBuffer)
+            } else if hasMicInput {
+                // Send mono mic when no file is playing
+                outgoing <- gumble.AudioBuffer(int16Buffer)
             }
-
-            outgoing <- gumble.AudioBuffer(int16Buffer)
         }
     }
 }

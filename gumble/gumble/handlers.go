@@ -1073,6 +1073,9 @@ func (c *Client) handleCodecVersion(buffer []byte) error {
 			c.volatile.Lock()
 
 			c.AudioEncoder = codec.NewEncoder()
+			// Also create a stereo encoder for file playback
+			// Import the opus package to get NewStereoEncoder
+			c.AudioEncoderStereo = nil // Will be set when needed
 
 			c.volatile.Unlock()
 		}

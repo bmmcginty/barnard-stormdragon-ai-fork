@@ -53,7 +53,11 @@ type AudioStreamEvent struct {
 type AudioBuffer []int16
 
 func (a AudioBuffer) writeAudio(client *Client, seq int64, final bool) error {
+    // Choose encoder based on whether stereo is enabled
     encoder := client.AudioEncoder
+    if client.IsStereoEncoderEnabled() && client.AudioEncoderStereo != nil {
+        encoder = client.AudioEncoderStereo
+    }
     if encoder == nil {
         return nil
     }

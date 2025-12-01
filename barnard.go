@@ -2,9 +2,11 @@ package main
 
 import (
     "crypto/tls"
+    "sync"
 
     "git.stormux.org/storm/barnard/audio"
     "git.stormux.org/storm/barnard/config"
+    "git.stormux.org/storm/barnard/fileplayback"
     "git.stormux.org/storm/barnard/gumble/gumble"
     "git.stormux.org/storm/barnard/gumble/gumbleopenal"
     "git.stormux.org/storm/barnard/noise"
@@ -51,6 +53,10 @@ type Barnard struct {
 
     // Added for voice effects
     VoiceEffects *audio.EffectsProcessor
+
+    // Added for file playback
+    FileStream      *fileplayback.Player
+    FileStreamMutex sync.Mutex
 }
 
 func (b *Barnard) StopTransmission() {

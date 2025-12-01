@@ -59,8 +59,10 @@ type Client struct {
 	ContextActions ContextActions
 
 	// The audio encoder used when sending audio to the server.
-	AudioEncoder AudioEncoder
-	audioCodec   AudioCodec
+	AudioEncoder       AudioEncoder
+	AudioEncoderStereo AudioEncoder
+	audioCodec         AudioCodec
+	useStereoEncoder   bool
 	// To whom transmitted audio will be sent. The VoiceTarget must have already
 	// been sent to the server for targeting to work correctly. Setting to nil
 	// will disable voice targeting (i.e. switch back to regular speaking).
@@ -286,4 +288,25 @@ func (c *Client) Do(f func()) {
 // Send will send a Message to the server.
 func (c *Client) Send(message Message) {
 	message.writeMessage(c)
+}
+
+// EnableStereoEncoder switches to stereo encoding for file playback.
+func (c *Client) EnableStereoEncoder() {
+	c.volatile.Lock()
+	defer c.volatile.Unlock()
+	c.useStereoEncoder = true
+}
+
+// DisableStereoEncoder switches back to mono encoding for voice.
+func (c *Client) DisableStereoEncoder() {
+	c.volatile.Lock()
+	defer c.volatile.Unlock()
+	c.useStereoEncoder = false
+}
+
+// IsStereoEncoderEnabled returns true if stereo encoding is currently active.
+func (c *Client) IsStereoEncoderEnabled() bool {
+	c.volatile.RLock()
+	defer c.volatile.RUnlock()
+	return c.useStereoEncoder
 }

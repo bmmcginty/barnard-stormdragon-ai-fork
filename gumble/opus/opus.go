@@ -35,6 +35,16 @@ func (*generator) NewEncoder() gumble.AudioEncoder {
     }
 }
 
+// NewStereoEncoder creates a stereo encoder for file playback
+func NewStereoEncoder() gumble.AudioEncoder {
+    // Create stereo encoder for file playback
+    e, _ := opus.NewEncoder(gumble.AudioSampleRate, gumble.AudioChannels, opus.AppAudio)
+    e.SetBitrateToMax()
+    return &Encoder{
+        e,
+    }
+}
+
 func (*generator) NewDecoder() gumble.AudioDecoder {
     // Create decoder with stereo support
     d, _ := opus.NewDecoder(gumble.AudioSampleRate, gumble.AudioChannels)
