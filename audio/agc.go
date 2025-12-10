@@ -21,7 +21,7 @@ type AGC struct {
 // NewAGC creates a new AGC processor with sensible defaults for voice
 func NewAGC() *AGC {
 	return &AGC{
-		targetLevel:    0.20,  // Target 20% of max amplitude (matches Mumble levels)
+		targetLevel:    0.18,  // Target 18% of max amplitude (balanced level)
 		maxGain:        8.0,   // Maximum 8x gain (about 18dB)
 		minGain:        0.1,   // Minimum 0.1x gain (-20dB)
 		attackTime:     0.005, // Fast attack (5ms)
@@ -106,10 +106,10 @@ func (agc *AGC) ProcessSamples(samples []int16) {
 		}
 
 		// Soft limiting to prevent clipping
-		if processed > 0.95 {
-			processed = 0.95 + (processed-0.95)*0.1
-		} else if processed < -0.95 {
-			processed = -0.95 + (processed+0.95)*0.1
+		if processed > 0.90 {
+			processed = 0.90 + (processed-0.90)*0.1
+		} else if processed < -0.90 {
+			processed = -0.90 + (processed+0.90)*0.1
 		}
 
 		// Convert back to int16
