@@ -21,10 +21,10 @@ type AGC struct {
 // NewAGC creates a new AGC processor with sensible defaults for voice
 func NewAGC() *AGC {
 	return &AGC{
-		targetLevel:    0.15,  // Target 15% of max amplitude
-		maxGain:        6.0,   // Maximum 6x gain (about 15.5dB)
+		targetLevel:    0.20,  // Target 20% of max amplitude (matches Mumble levels)
+		maxGain:        8.0,   // Maximum 8x gain (about 18dB)
 		minGain:        0.1,   // Minimum 0.1x gain (-20dB)
-		attackTime:     0.001, // Fast attack (1ms)
+		attackTime:     0.005, // Fast attack (5ms)
 		releaseTime:    0.1,   // Slower release (100ms)
 		currentGain:    1.0,   // Start with unity gain
 		envelope:       0.0,   // Start with zero envelope
@@ -87,7 +87,7 @@ func (agc *AGC) ProcessSamples(samples []int16) {
 
 	// Smooth gain changes
 	if desiredGain > agc.currentGain {
-		agc.currentGain += (desiredGain - agc.currentGain) * agc.attackTime * 0.1
+		agc.currentGain += (desiredGain - agc.currentGain) * agc.attackTime
 	} else {
 		agc.currentGain += (desiredGain - agc.currentGain) * agc.releaseTime
 	}
