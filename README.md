@@ -33,7 +33,7 @@ Barnard includes real-time voice effects that can be applied to your outgoing mi
 
 ### Controls
 - **F12 key**: Cycle through voice effects (configurable hotkey)
-- **Configuration**: Your selected effect is saved in `~/.barnard.yaml`
+- **Configuration**: Your selected effect is saved in `~/.barnard.toml`
 
 ### How It Works
 Voice effects are applied to your outgoing audio in real-time, after noise suppression and automatic gain control. The effects use various digital signal processing techniques including delay lines, pitch shifting with cubic interpolation, and ring modulation.
@@ -52,12 +52,12 @@ Barnard includes real-time noise suppression for microphone input to filter out 
 - **F9 key**: Toggle noise suppression on/off (configurable hotkey)
 - **Command line**: Use `--noise-suppression` flag to enable at startup
 - **FIFO command**: Send `noise` command to toggle during runtime
-- **Configuration**: Set `noisesuppressionenabled` and `noisesuppressionthreshold` in `~/.barnard.yaml`
+- **Configuration**: Set `noisesuppressionenabled` and `noisesuppressionthreshold` in `~/.barnard.toml`
 
 ### Configuration Example
-```yaml
-noisesuppressionenabled: true
-noisesuppressionthreshold: 0.02
+```toml
+noisesuppressionenabled = true
+noisesuppressionthreshold = 0.02
 ```
 
 The noise suppression algorithm uses a combination of high-pass filtering and noise gating to reduce unwanted background sounds while preserving voice quality.
@@ -124,8 +124,8 @@ Our thanks go out to Tim Cooper for the massive amount of work put into this cli
 
 ## Config
 
-By default, the file $HOME/.barnard.yaml will hold the configuration for Barnard.
-You can have barnard read another file by using the -c option, like `./barnard -c ~/.anotherbarnard.yaml`.
+By default, the file $HOME/.barnard.toml will hold the configuration for Barnard.
+You can have barnard read another file by using the -c option, like `./barnard -c ~/.anotherbarnard.toml`.
 It will be created automatically if it doesn't exist.
 If you modify the config file while Barnard is running, your changes may be overwritten.
 
@@ -169,7 +169,7 @@ If Jim's volume is set to 0.1, and larry's volume is set to 0.9, lowering the ch
 
 You can change the volume for a user once that user has spoken at least once during a session.
 Attempts to change the volume of a user who has not spoken will be ignored.
-If you are unable to hear a user speaking, you can edit the .barnard.yaml file in your home directory, after closing Barnard, and set the volume parameter to 1.0 for a particular user.
+If you are unable to hear a user speaking, you can edit the .barnard.toml file in your home directory, after closing Barnard, and set the volume parameter to 1.0 for a particular user.
 
 ### Technical
 

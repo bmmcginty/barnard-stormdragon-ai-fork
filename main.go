@@ -108,7 +108,7 @@ func main() {
 	password := flag.String("password", "", "the password of the server")
 	insecure := flag.Bool("insecure", false, "skip server certificate verification")
 	certificate := flag.String("certificate", "", "PEM encoded certificate and private key")
-	cfgfn := flag.String("config", "~/.barnard.yaml", "Path to YAML formatted configuration file")
+	cfgfn := flag.String("config", "~/.barnard.toml", "Path to TOML formatted configuration file")
 	list_devices := flag.Bool("list_devices", false, "do not connect; instead, list available audio devices and exit")
 	fifo := flag.String("fifo", "", "path of a FIFO from which to read commands")
 	serverSet := false

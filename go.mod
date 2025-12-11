@@ -7,7 +7,7 @@ require (
 	github.com/golang/protobuf v1.5.3
 	github.com/kennygrant/sanitize v1.2.4
 	github.com/nsf/termbox-go v1.1.1
-	gopkg.in/yaml.v2 v2.4.0
+	github.com/pelletier/go-toml/v2 v2.2.4
 )
 
 require (

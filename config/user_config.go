@@ -3,7 +3,7 @@ package config
 import (
     "fmt"
     "git.stormux.org/storm/barnard/uiterm"
-    "gopkg.in/yaml.v2"
+    "github.com/pelletier/go-toml/v2"
     "git.stormux.org/storm/barnard/gumble/gumble"
     "io/ioutil"
     "os"
@@ -46,7 +46,7 @@ type eUser struct {
 
 func (c *Config) SaveConfig() {
     var data []byte
-    data, err := yaml.Marshal(c.config)
+    data, err := toml.Marshal(c.config)
     if err != nil {
         panic(err)
     }
@@ -85,7 +85,7 @@ func (c *Config) LoadConfig() {
         var data []byte
         data = readFile(c.fn)
         if data != nil {
-            err := yaml.UnmarshalStrict(data, &jc)
+            err := toml.Unmarshal(data, &jc)
             if err != nil {
                 fmt.Fprintf(os.Stderr, "Error parsing \"%s\".\n%s\n", c.fn, err.Error())
                 os.Exit(1)
@@ -114,7 +114,7 @@ func (c *Config) LoadConfig() {
         jc.Username = &username
     }
     if c.config.NotifyCommand == nil {
-        ncmd := string("")
+        ncmd := string("/usr/share/barnard/barnard-sound.sh \"%event\" \"%who\" \"%what\"")
         jc.NotifyCommand = &ncmd
     }
     if c.config.NoiseSuppressionEnabled == nil {
