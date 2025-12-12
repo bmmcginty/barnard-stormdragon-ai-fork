@@ -138,11 +138,8 @@ connect() {
     local username
     username="$(grep -m 1 '^Username = ' ~/.barnard.toml 2> /dev/null | cut -d '=' -f2- | sed "s/^[[:space:]]*//;s/[[:space:]]*$//;s/'//g")"
     username="${username//[[:space:]]/_}"
-    if [[ -n "$username" ]]; then
-        command barnard -username "$username" -server ${mumbleServerList[$serverName]} --fifo ~/.config/barnard/cmd --buffers 16 |& log
-    else
-        command barnard -server ${mumbleServerList[$serverName]} --fifo ~/.config/barnard/cmd --buffers 16 |& log
-    fi
+    username="${username:-${USER}-${HOSTNAME}}"
+    command barnard -username "$username" -server ${mumbleServerList[$serverName]} --fifo ~/.config/barnard/cmd --buffers 16 |& log
 }
 
 remove-server() {
