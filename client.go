@@ -179,6 +179,11 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
     if e.Type.Has(gumble.UserChangeConnected) {
         s = "joined"
         t = "join"
+        // Notify about users joining our channel
+        if e.User.Channel.Name == b.Client.Self.Channel.Name {
+            b.Notify(t, e.User.Name, e.User.Channel.Name)
+            b.AddOutputLine(fmt.Sprintf("%s %s %s", e.User.Name, s, e.User.Channel.Name))
+        }
     }
     if e.Type.Has(gumble.UserChangeDisconnected) {
         s = "left"
@@ -186,10 +191,11 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
         if e.User == b.selectedUser {
             b.SetSelectedUser(nil)
         }
-    }
-    if e.User.Channel.Name == b.Client.Self.Channel.Name {
-        b.Notify(t, e.User.Name, e.User.Channel.Name)
-        b.AddOutputLine(fmt.Sprintf("%s %s %s", e.User.Name, s, e.User.Channel.Name))
+        // Always notify about disconnects if user has channel info and was in our channel
+        if e.User.Channel != nil && e.User.Channel.Name == b.Client.Self.Channel.Name {
+            b.Notify(t, e.User.Name, e.User.Channel.Name)
+            b.AddOutputLine(fmt.Sprintf("%s %s %s", e.User.Name, s, e.User.Channel.Name))
+        }
     }
     if e.Type.Has(gumble.UserChangeChannel) && e.User == b.Client.Self {
         b.UpdateInputStatus(fmt.Sprintf("[%s]", e.User.Channel.Name))
