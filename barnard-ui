@@ -135,10 +135,14 @@ connect() {
     if [[ -z "$serverName" || "$serverName" == "Go Back" ]]; then
         return
     fi
-    local username="$(grep '^username: .*$' ~/.barnard.yaml 2> /dev/null | cut -d ' ' -f2-)"
+    local username
+    username="$(grep -m 1 '^Username = ' ~/.barnard.toml 2> /dev/null | cut -d '=' -f2- | sed "s/^[[:space:]]*//;s/[[:space:]]*$//;s/'//g")"
     username="${username//[[:space:]]/_}"
-    username="${username//\"/}"
-    command barnard -username "${username:-${USER}-${HOSTNAME}}" -server ${mumbleServerList[$serverName]} --fifo ~/.config/barnard/cmd --buffers 16 |& log
+    if [[ -n "$username" ]]; then
+        command barnard -username "$username" -server ${mumbleServerList[$serverName]} --fifo ~/.config/barnard/cmd --buffers 16 |& log
+    else
+        command barnard -server ${mumbleServerList[$serverName]} --fifo ~/.config/barnard/cmd --buffers 16 |& log
+    fi
 }
 
 remove-server() {
