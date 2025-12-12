@@ -85,7 +85,7 @@ menulist() {
     # returns: selected tag
     local i
     local menuList
-    for i in $@ ; do
+    for i in "$@" ; do
         menuList+=("$i" "$i")
     done
     dialog --backtitle "$(gettext "Use the up and down arrow keys to find the option you want, then press enter to select it.")" \
@@ -139,7 +139,11 @@ connect() {
     username="$(grep -m 1 '^Username = ' ~/.barnard.toml 2> /dev/null | cut -d '=' -f2- | sed "s/^[[:space:]]*//;s/[[:space:]]*$//;s/'//g")"
     username="${username//[[:space:]]/_}"
     username="${username:-${USER}-${HOSTNAME}}"
-    command barnard -username "$username" -server ${mumbleServerList[$serverName]} --fifo ~/.config/barnard/cmd --buffers 16 |& log
+    local certArgs=()
+    if [[ -f "$certFile" ]]; then
+        certArgs=(-certificate "$certFile")
+    fi
+    command barnard -username "$username" -server "${mumbleServerList[$serverName]}" "${certArgs[@]}" --fifo ~/.config/barnard/cmd --buffers 16 |& log
 }
 
 remove-server() {
@@ -160,9 +164,99 @@ remove-server() {
     msgbox "$(gettext "Removed server") $serverName"
   }  
 
+# Certificate configuration
+certDir="$HOME/.config/barnard"
+certFile="$certDir/barnard.pem"
+
+generate-certificate() {
+    if [[ -f "$certFile" ]]; then
+        if [[ "$(yesno "$(gettext "A certificate already exists. Do you want to replace it? This may affect your registered identity on servers.")")" != "Yes" ]]; then
+            return
+        fi
+    fi
+    local commonName
+    commonName="$(inputbox "$(gettext "Enter a name for your certificate (e.g., your username):")" "barnard")"
+    [[ $? -ne 0 ]] && return
+    [[ -z "$commonName" ]] && commonName="barnard"
+
+    if openssl req -x509 -newkey rsa:2048 -keyout "$certFile" -out "$certFile" -days 3650 -nodes -subj "/CN=$commonName" 2>/dev/null; then
+        chmod 600 "$certFile"
+        msgbox "$(gettext "Certificate generated successfully.")"
+    else
+        msgbox "$(gettext "Failed to generate certificate. Make sure openssl is installed.")"
+    fi
+}
+
+view-certificate() {
+    if [[ ! -f "$certFile" ]]; then
+        msgbox "$(gettext "No certificate found.") $certFile"
+        return
+    fi
+    local certInfo
+    certInfo=$(openssl x509 -in "$certFile" -noout -subject -dates -fingerprint 2>/dev/null)
+    if [[ -n "$certInfo" ]]; then
+        msgbox "$certInfo"
+    else
+        msgbox "$(gettext "Could not read certificate information.")"
+    fi
+}
+
+import-certificate() {
+    local importPath
+    importPath="$(inputbox "$(gettext "Enter the full path to your certificate file (PEM format with certificate and private key):")")"
+    [[ $? -ne 0 ]] && return
+    [[ -z "$importPath" ]] && return
+
+    # Expand ~ if present
+    importPath="${importPath/#\~/$HOME}"
+
+    if [[ ! -f "$importPath" ]]; then
+        msgbox "$(gettext "File not found:") $importPath"
+        return
+    fi
+
+    # Verify it's a valid certificate
+    if ! openssl x509 -in "$importPath" -noout 2>/dev/null; then
+        msgbox "$(gettext "The file does not appear to be a valid PEM certificate.")"
+        return
+    fi
+
+    # Verify it contains a private key
+    if ! openssl rsa -in "$importPath" -check -noout 2>/dev/null && ! openssl ec -in "$importPath" -check -noout 2>/dev/null; then
+        msgbox "$(gettext "The file does not appear to contain a valid private key. The certificate file must contain both the certificate and private key.")"
+        return
+    fi
+
+    if [[ -f "$certFile" ]]; then
+        if [[ "$(yesno "$(gettext "A certificate already exists. Do you want to replace it?")")" != "Yes" ]]; then
+            return
+        fi
+    fi
+
+    if cp "$importPath" "$certFile" && chmod 600 "$certFile"; then
+        msgbox "$(gettext "Certificate imported successfully.")"
+    else
+        msgbox "$(gettext "Failed to import certificate.")"
+    fi
+}
+
+manage-certificate() {
+    while : ; do
+        local certAction
+        certAction="$(menulist "Generate" "View" "Import" "Go_Back")"
+        [[ $? -eq 1 ]] && return
+        case "$certAction" in
+            "Generate") generate-certificate ;;
+            "View") view-certificate ;;
+            "Import") import-certificate ;;
+            "Go_Back"|"") return ;;
+        esac
+    done
+}
+
 # main menu
 while : ; do
-    action="$(menulist "Connect" "Add_server" "Remove_server")"
+    action="$(menulist "Connect" "Add_server" "Remove_server" "Manage_Certificate")"
     [[ $? -eq 1 ]] && exit 0
     action="${action,,}"
     action="${action//_/-}"

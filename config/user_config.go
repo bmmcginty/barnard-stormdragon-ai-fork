@@ -29,6 +29,7 @@ type exportableConfig struct {
     NoiseSuppressionEnabled    *bool
     NoiseSuppressionThreshold *float32
     VoiceEffect   *int
+    Certificate   *string
 }
 
 type server struct {
@@ -129,6 +130,10 @@ func (c *Config) LoadConfig() {
         effect := 0 // Default to EffectNone
         jc.VoiceEffect = &effect
     }
+    if c.config.Certificate == nil {
+        cert := string("")
+        jc.Certificate = &cert
+    }
 }
 
 func (c *Config) findServer(address string) *server {
@@ -212,6 +217,10 @@ func (c *Config) GetDefaultServer() *string {
 
 func (c *Config) GetUsername() *string {
     return c.config.Username
+}
+
+func (c *Config) GetCertificate() *string {
+    return c.config.Certificate
 }
 
 func (c *Config) GetNoiseSuppressionEnabled() bool {

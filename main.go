@@ -127,12 +127,15 @@ func main() {
 
 	userConfig := config.NewConfig(cfgfn)
 
+	certificateSet := false
 	flag.CommandLine.Visit(func(theFlag *flag.Flag) {
 		switch theFlag.Name {
 		case "server":
 			serverSet = true
 		case "username":
 			usernameSet = true
+		case "certificate":
+			certificateSet = true
 		}
 	})
 
@@ -141,6 +144,9 @@ func main() {
 	}
 	if !usernameSet {
 		username = userConfig.GetUsername()
+	}
+	if !certificateSet {
+		certificate = userConfig.GetCertificate()
 	}
 
 	if os.Getenv("ALSOFT_LOGLEVEL") == "" {
