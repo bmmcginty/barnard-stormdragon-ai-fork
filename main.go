@@ -15,15 +15,15 @@ import (
 	//"github.com/google/shlex"
 	"crypto/tls"
 	"flag"
-	"github.com/alessio/shellescape"
 	"git.stormux.org/storm/barnard/audio"
 	"git.stormux.org/storm/barnard/config"
 	"git.stormux.org/storm/barnard/noise"
+	"github.com/alessio/shellescape"
 
+	"git.stormux.org/storm/barnard/gumble/go-openal/openal"
 	"git.stormux.org/storm/barnard/gumble/gumble"
 	_ "git.stormux.org/storm/barnard/gumble/opus"
 	"git.stormux.org/storm/barnard/uiterm"
-	"git.stormux.org/storm/barnard/gumble/go-openal/openal"
 )
 
 func show_devs(name string, args []string) {
@@ -109,6 +109,7 @@ func main() {
 	insecure := flag.Bool("insecure", false, "skip server certificate verification")
 	certificate := flag.String("certificate", "", "PEM encoded certificate and private key")
 	cfgfn := flag.String("config", "~/.barnard.toml", "Path to TOML formatted configuration file")
+	audioDriver := flag.String("audio-driver", "", "preferred OpenAL backend (pipewire, pulse, alsa, jack)")
 	list_devices := flag.Bool("list_devices", false, "do not connect; instead, list available audio devices and exit")
 	fifo := flag.String("fifo", "", "path of a FIFO from which to read commands")
 	serverSet := false
@@ -149,6 +150,19 @@ func main() {
 		certificate = userConfig.GetCertificate()
 	}
 
+	driver := strings.TrimSpace(*audioDriver)
+	if driver == "" {
+		// Environment variable takes precedence over config
+		if envDriver := os.Getenv("ALSOFT_DRIVERS"); envDriver != "" {
+			driver = envDriver
+		} else {
+			driver = strings.TrimSpace(userConfig.GetAudioDriver())
+		}
+	}
+	if driver != "" {
+		os.Setenv("ALSOFT_DRIVERS", driver)
+	}
+
 	if os.Getenv("ALSOFT_LOGLEVEL") == "" {
 		os.Setenv("ALSOFT_LOGLEVEL", "0")
 	}
@@ -164,18 +178,18 @@ func main() {
 
 	// Initialize
 	b := Barnard{
-		Config:     gumble.NewConfig(),
-		UserConfig: userConfig,
-		Address:    *server,
-		MutedChannels: make(map[uint32]bool),
+		Config:          gumble.NewConfig(),
+		UserConfig:      userConfig,
+		Address:         *server,
+		MutedChannels:   make(map[uint32]bool),
 		NoiseSuppressor: noise.NewSuppressor(),
-		VoiceEffects: audio.NewEffectsProcessor(gumble.AudioSampleRate),
+		VoiceEffects:    audio.NewEffectsProcessor(gumble.AudioSampleRate),
 	}
 	b.Config.Buffers = *buffers
 
 	b.Hotkeys = b.UserConfig.GetHotkeys()
 	b.UserConfig.SaveConfig()
-	
+
 	// Configure noise suppression
 	enabled := b.UserConfig.GetNoiseSuppressionEnabled()
 	if *noiseSuppressionEnabled {

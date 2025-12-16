@@ -141,6 +141,18 @@ Pass the -list_devices parameter to barnard to be given a list of audio input an
 Copy lines from the above list into inputdevice and outputdevice as desired.
 To clear your inputdevice or outputdevice options and set them to defaults, set them to "" or delete them entirely.
 
+### Audio Backends (ALSA, PipeWire, PulseAudio)
+
+Barnard uses OpenAL Soft for audio. By default it will pick the first available backend (often ALSA), but you can force a specific driver:
+
+- Command line: `./barnard --audio-driver pipewire` (or `pulse`, `alsa`, `jack`)
+- Config file: add `audiodriver = "pipewire"` to your `~/.barnard.toml`
+- Environment: `ALSOFT_DRIVERS=pipewire ./barnard` (takes precedence over config)
+
+If PipeWire or PulseAudio support is missing, install OpenAL Soft with the corresponding backend enabled (e.g., `libopenal1` or `openal-soft` packages built with PipeWire). After changing drivers, rerun with `--list_devices` to confirm the desired devices appear.
+
+Leaving `audiodriver` empty in the config keeps the OpenAL default ordering (PipeWire/Pulse first if available, then ALSA).
+
 ## Keystrokes
 
 You can see the below keystrokes in your config file.
