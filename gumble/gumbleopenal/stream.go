@@ -1,442 +1,586 @@
 package gumbleopenal
 
 import (
-    "encoding/binary"
-    "errors"
-    "os/exec"
-    "time"
+	"encoding/binary"
+	"errors"
+	"os/exec"
+	"time"
 
-    "git.stormux.org/storm/barnard/audio"
-    "git.stormux.org/storm/barnard/gumble/gumble"
-    "git.stormux.org/storm/barnard/gumble/go-openal/openal"
+	"git.stormux.org/storm/barnard/audio"
+	"git.stormux.org/storm/barnard/gumble/go-openal/openal"
+	"git.stormux.org/storm/barnard/gumble/gumble"
+	"git.stormux.org/storm/barnard/noise"
 )
 
 // NoiseProcessor interface for noise suppression
 type NoiseProcessor interface {
-    ProcessSamples(samples []int16)
-    IsEnabled() bool
+	ProcessSamples(samples []int16)
+	IsEnabled() bool
 }
 
 // EffectsProcessor interface for voice effects
 type EffectsProcessor interface {
-    ProcessSamples(samples []int16)
-    IsEnabled() bool
+	ProcessSamples(samples []int16)
+	IsEnabled() bool
 }
 
 // FilePlayer interface for file playback
 type FilePlayer interface {
-    GetAudioFrame() []int16
-    IsPlaying() bool
+	GetAudioFrame() []int16
+	IsPlaying() bool
 }
 
 const (
-    maxBufferSize = 11520  // Max frame size (2880) * bytes per stereo sample (4)
+	maxBufferSize = 11520 // Max frame size (2880) * bytes per stereo sample (4)
 )
 
 var (
-    ErrState        = errors.New("gumbleopenal: invalid state")
-    ErrMic          = errors.New("gumbleopenal: microphone disconnected or misconfigured")
-    ErrInputDevice  = errors.New("gumbleopenal: invalid input device or parameters")
-    ErrOutputDevice = errors.New("gumbleopenal: invalid output device or parameters")
+	ErrState        = errors.New("gumbleopenal: invalid state")
+	ErrMic          = errors.New("gumbleopenal: microphone disconnected or misconfigured")
+	ErrInputDevice  = errors.New("gumbleopenal: invalid input device or parameters")
+	ErrOutputDevice = errors.New("gumbleopenal: invalid output device or parameters")
 )
 
 func beep() {
-    cmd := exec.Command("beep")
-    cmdout, err := cmd.Output()
-    if err != nil {
-        panic(err)
-    }
-    if cmdout != nil {
-    }
+	cmd := exec.Command("beep")
+	cmdout, err := cmd.Output()
+	if err != nil {
+		panic(err)
+	}
+	if cmdout != nil {
+	}
 }
 
 type Stream struct {
-    client *gumble.Client
-    link   gumble.Detacher
+	client *gumble.Client
+	link   gumble.Detacher
 
-    deviceSource    *openal.CaptureDevice
-    sourceFrameSize int
-    micVolume      float32
-    sourceStop     chan bool
+	deviceSource    *openal.CaptureDevice
+	sourceFormat    openal.Format
+	sourceChannels  int
+	sourceFrameSize int
+	micVolume       float32
+	sourceStop      chan bool
 
-    deviceSink  *openal.Device
-    contextSink *openal.Context
+	deviceSink  *openal.Device
+	contextSink *openal.Context
 
-    noiseProcessor   NoiseProcessor
-    micAGC           *audio.AGC
-    effectsProcessor EffectsProcessor
-    filePlayer       FilePlayer
+	noiseProcessor        NoiseProcessor
+	noiseProcessorRight   NoiseProcessor
+	micAGC                *audio.AGC
+	micAGCRight           *audio.AGC
+	effectsProcessor      EffectsProcessor
+	effectsProcessorRight EffectsProcessor
+	filePlayer            FilePlayer
 }
 
 func New(client *gumble.Client, inputDevice *string, outputDevice *string, test bool) (*Stream, error) {
-    frmsz := 480
-    if !test {
-        frmsz = client.Config.AudioFrameSize()
-    }
+	frmsz := 480
+	if !test {
+		frmsz = client.Config.AudioFrameSize()
+	}
 
-    // Always use mono for input device
-    idev := openal.CaptureOpenDevice(*inputDevice, gumble.AudioSampleRate, openal.FormatMono16, uint32(frmsz))
-    if idev == nil {
-        return nil, ErrInputDevice
-    }
+	inputFormat := openal.FormatStereo16
+	sourceChannels := 2
+	idev := openal.CaptureOpenDevice(*inputDevice, gumble.AudioSampleRate, inputFormat, uint32(frmsz))
+	if idev == nil {
+		inputFormat = openal.FormatMono16
+		sourceChannels = 1
+		idev = openal.CaptureOpenDevice(*inputDevice, gumble.AudioSampleRate, inputFormat, uint32(frmsz))
+	}
+	if idev == nil {
+		return nil, ErrInputDevice
+	}
 
-    odev := openal.OpenDevice(*outputDevice)
-    if odev == nil {
-        idev.CaptureCloseDevice()
-        return nil, ErrOutputDevice
-    }
+	odev := openal.OpenDevice(*outputDevice)
+	if odev == nil {
+		idev.CaptureCloseDevice()
+		return nil, ErrOutputDevice
+	}
 
-    if test {
-        idev.CaptureCloseDevice()
-        odev.CloseDevice()
-        return nil, nil
-    }
+	if test {
+		idev.CaptureCloseDevice()
+		odev.CloseDevice()
+		return nil, nil
+	}
 
-    s := &Stream{
-        client:          client,
-        sourceFrameSize: frmsz,
-        micVolume:      1.0,
-        micAGC:         audio.NewAGC(), // Always enable AGC for outgoing mic
-    }
+	s := &Stream{
+		client:          client,
+		sourceFormat:    inputFormat,
+		sourceChannels:  sourceChannels,
+		sourceFrameSize: frmsz,
+		micVolume:       1.0,
+		micAGC:          audio.NewAGC(), // Always enable AGC for outgoing mic
+	}
+	if sourceChannels == 2 {
+		s.micAGCRight = audio.NewAGC()
+	}
 
-    s.deviceSource = idev
-    if s.deviceSource == nil {
-        return nil, ErrInputDevice
-    }
+	s.deviceSource = idev
+	if s.deviceSource == nil {
+		return nil, ErrInputDevice
+	}
 
-    s.deviceSink = odev
-    if s.deviceSink == nil {
-        return nil, ErrOutputDevice
-    }
-    s.contextSink = s.deviceSink.CreateContext()
-    if s.contextSink == nil {
-        s.Destroy()
-        return nil, ErrOutputDevice
-    }
-    s.contextSink.Activate()
+	s.deviceSink = odev
+	if s.deviceSink == nil {
+		return nil, ErrOutputDevice
+	}
+	s.contextSink = s.deviceSink.CreateContext()
+	if s.contextSink == nil {
+		s.Destroy()
+		return nil, ErrOutputDevice
+	}
+	s.contextSink.Activate()
 
-    return s, nil
+	return s, nil
 }
 
 func (s *Stream) AttachStream(client *gumble.Client) {
-    s.link = client.Config.AttachAudio(s)
+	s.link = client.Config.AttachAudio(s)
 }
 
 func (s *Stream) SetNoiseProcessor(np NoiseProcessor) {
-    s.noiseProcessor = np
+	s.noiseProcessor = np
+	s.noiseProcessorRight = cloneNoiseProcessor(np)
 }
 
 func (s *Stream) SetEffectsProcessor(ep EffectsProcessor) {
-    s.effectsProcessor = ep
+	s.effectsProcessor = ep
+	s.effectsProcessorRight = cloneEffectsProcessor(ep)
 }
 
 func (s *Stream) GetEffectsProcessor() EffectsProcessor {
-    return s.effectsProcessor
+	return s.effectsProcessor
 }
 
 func (s *Stream) SetFilePlayer(fp FilePlayer) {
-    s.filePlayer = fp
+	s.filePlayer = fp
 }
 
 func (s *Stream) GetFilePlayer() FilePlayer {
-    return s.filePlayer
+	return s.filePlayer
 }
 
-
 func (s *Stream) Destroy() {
-    if s.link != nil {
-        s.link.Detach()
-    }
-    if s.deviceSource != nil {
-        s.StopSource()
-        s.deviceSource.CaptureCloseDevice()
-        s.deviceSource = nil
-    }
-    if s.deviceSink != nil {
-        s.contextSink.Destroy()
-        s.deviceSink.CloseDevice()
-        s.contextSink = nil
-        s.deviceSink = nil
-    }
+	if s.link != nil {
+		s.link.Detach()
+	}
+	if s.deviceSource != nil {
+		s.StopSource()
+		s.deviceSource.CaptureCloseDevice()
+		s.deviceSource = nil
+	}
+	if s.deviceSink != nil {
+		s.contextSink.Destroy()
+		s.deviceSink.CloseDevice()
+		s.contextSink = nil
+		s.deviceSink = nil
+	}
 }
 
 func (s *Stream) StartSource(inputDevice *string) error {
-    if s.sourceStop != nil {
-        return ErrState
-    }
-    if s.deviceSource == nil {
-        return ErrMic
-    }
-    s.deviceSource.CaptureStart()
-    s.sourceStop = make(chan bool)
-    go s.sourceRoutine(inputDevice)
-    return nil
+	if s.sourceStop != nil {
+		return ErrState
+	}
+	if s.deviceSource == nil {
+		return ErrMic
+	}
+	s.deviceSource.CaptureStart()
+	s.sourceStop = make(chan bool)
+	go s.sourceRoutine(inputDevice)
+	return nil
 }
 
 func (s *Stream) StopSource() error {
-    if s.deviceSource == nil {
-        return ErrMic
-    }
-    s.deviceSource.CaptureStop()
-    if s.sourceStop == nil {
-        return ErrState
-    }
-    close(s.sourceStop)
-    s.sourceStop = nil
-    return nil
+	if s.deviceSource == nil {
+		return ErrMic
+	}
+	s.deviceSource.CaptureStop()
+	if s.sourceStop == nil {
+		return ErrState
+	}
+	close(s.sourceStop)
+	s.sourceStop = nil
+	return nil
 }
 
 func (s *Stream) GetMicVolume() float32 {
-    return s.micVolume
+	return s.micVolume
 }
 
 func (s *Stream) SetMicVolume(change float32, relative bool) {
-    var val float32
-    if relative {
-        val = s.GetMicVolume() + change
-    } else {
-        val = change
-    }
-    if val >= 1 {
-        val = 1.0
-    }
-    if val <= 0 {
-        val = 0
-    }
-    s.micVolume = val
+	var val float32
+	if relative {
+		val = s.GetMicVolume() + change
+	} else {
+		val = change
+	}
+	if val >= 1 {
+		val = 1.0
+	}
+	if val <= 0 {
+		val = 0
+	}
+	s.micVolume = val
 }
 
 func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
-    go func(e *gumble.AudioStreamEvent) {
-        var source = openal.NewSource()
-        e.User.AudioSource = &source
-        
-        // Set initial gain based on volume and mute state
-        if e.User.LocallyMuted {
-            e.User.AudioSource.SetGain(0)
-        } else {
-            e.User.AudioSource.SetGain(e.User.Volume)
-        }
+	go func(e *gumble.AudioStreamEvent) {
+		var source = openal.NewSource()
+		e.User.AudioSource = &source
 
-        bufferCount := e.Client.Config.Buffers
-        if bufferCount < 64 {
-            bufferCount = 64
-        }
-        emptyBufs := openal.NewBuffers(bufferCount)
-        
-        reclaim := func() {
-            if n := source.BuffersProcessed(); n > 0 {
-                reclaimedBufs := make(openal.Buffers, n)
-                source.UnqueueBuffers(reclaimedBufs)
-                emptyBufs = append(emptyBufs, reclaimedBufs...)
-            }
-        }
+		// Set initial gain based on volume and mute state
+		if e.User.LocallyMuted {
+			e.User.AudioSource.SetGain(0)
+		} else {
+			e.User.AudioSource.SetGain(e.User.Volume)
+		}
 
-        var raw [maxBufferSize]byte
-        
-        for packet := range e.C {
-            // Skip processing if user is locally muted
-            if e.User.LocallyMuted {
-                continue
-            }
+		bufferCount := e.Client.Config.Buffers
+		if bufferCount < 64 {
+			bufferCount = 64
+		}
+		emptyBufs := openal.NewBuffers(bufferCount)
 
-            var boost uint16 = uint16(1)
-            samples := len(packet.AudioBuffer)
-            if samples > cap(raw)/2 {
-                continue
-            }
-            
-            boost = e.User.Boost
+		reclaim := func() {
+			if n := source.BuffersProcessed(); n > 0 {
+				reclaimedBufs := make(openal.Buffers, n)
+				source.UnqueueBuffers(reclaimedBufs)
+				emptyBufs = append(emptyBufs, reclaimedBufs...)
+			}
+		}
 
-            // Check if sample count suggests stereo data
-            isStereo := samples > gumble.AudioDefaultFrameSize && samples%2 == 0
-            format := openal.FormatMono16
-            if isStereo {
-                format = openal.FormatStereo16
-                samples = samples / 2
-            }
+		var raw [maxBufferSize]byte
 
-            rawPtr := 0
-            if isStereo {
-                // Process stereo samples as pairs
-                for i := 0; i < samples*2; i += 2 {
-                    // Process left channel with saturation protection
-                    sample := packet.AudioBuffer[i]
-                    if boost > 1 {
-                        boosted := int32(sample) * int32(boost)
-                        if boosted > 32767 {
-                            sample = 32767
-                        } else if boosted < -32767 {
-                            sample = -32767
-                        } else {
-                            sample = int16(boosted)
-                        }
-                    }
-                    binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
-                    rawPtr += 2
+		for packet := range e.C {
+			// Skip processing if user is locally muted
+			if e.User.LocallyMuted {
+				continue
+			}
 
-                    // Process right channel with saturation protection
-                    sample = packet.AudioBuffer[i+1]
-                    if boost > 1 {
-                        boosted := int32(sample) * int32(boost)
-                        if boosted > 32767 {
-                            sample = 32767
-                        } else if boosted < -32767 {
-                            sample = -32767
-                        } else {
-                            sample = int16(boosted)
-                        }
-                    }
-                    binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
-                    rawPtr += 2
-                }
-            } else {
-                // Process mono samples with saturation protection
-                for i := 0; i < samples; i++ {
-                    sample := packet.AudioBuffer[i]
-                    if boost > 1 {
-                        boosted := int32(sample) * int32(boost)
-                        if boosted > 32767 {
-                            sample = 32767
-                        } else if boosted < -32767 {
-                            sample = -32767
-                        } else {
-                            sample = int16(boosted)
-                        }
-                    }
-                    binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
-                    rawPtr += 2
-                }
-            }
+			var boost uint16 = uint16(1)
+			samples := len(packet.AudioBuffer)
+			if samples > cap(raw)/2 {
+				continue
+			}
 
-            reclaim()
-            if len(emptyBufs) == 0 {
-                continue
-            }
+			boost = e.User.Boost
 
-            last := len(emptyBufs) - 1
-            buffer := emptyBufs[last]
-            emptyBufs = emptyBufs[:last]
+			// Check if sample count suggests stereo data
+			isStereo := samples > gumble.AudioDefaultFrameSize && samples%2 == 0
+			format := openal.FormatMono16
+			if isStereo {
+				format = openal.FormatStereo16
+				samples = samples / 2
+			}
 
-            buffer.SetData(format, raw[:rawPtr], gumble.AudioSampleRate)
-            source.QueueBuffer(buffer)
+			rawPtr := 0
+			if isStereo {
+				// Process stereo samples as pairs
+				for i := 0; i < samples*2; i += 2 {
+					// Process left channel with saturation protection
+					sample := packet.AudioBuffer[i]
+					if boost > 1 {
+						boosted := int32(sample) * int32(boost)
+						if boosted > 32767 {
+							sample = 32767
+						} else if boosted < -32767 {
+							sample = -32767
+						} else {
+							sample = int16(boosted)
+						}
+					}
+					binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
+					rawPtr += 2
 
-            if source.State() != openal.Playing {
-                source.Play()
-            }
-        }
-        reclaim()
-        emptyBufs.Delete()
-        source.Delete()
-    }(e)
+					// Process right channel with saturation protection
+					sample = packet.AudioBuffer[i+1]
+					if boost > 1 {
+						boosted := int32(sample) * int32(boost)
+						if boosted > 32767 {
+							sample = 32767
+						} else if boosted < -32767 {
+							sample = -32767
+						} else {
+							sample = int16(boosted)
+						}
+					}
+					binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
+					rawPtr += 2
+				}
+			} else {
+				// Process mono samples with saturation protection
+				for i := 0; i < samples; i++ {
+					sample := packet.AudioBuffer[i]
+					if boost > 1 {
+						boosted := int32(sample) * int32(boost)
+						if boosted > 32767 {
+							sample = 32767
+						} else if boosted < -32767 {
+							sample = -32767
+						} else {
+							sample = int16(boosted)
+						}
+					}
+					binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
+					rawPtr += 2
+				}
+			}
+
+			reclaim()
+			if len(emptyBufs) == 0 {
+				continue
+			}
+
+			last := len(emptyBufs) - 1
+			buffer := emptyBufs[last]
+			emptyBufs = emptyBufs[:last]
+
+			buffer.SetData(format, raw[:rawPtr], gumble.AudioSampleRate)
+			source.QueueBuffer(buffer)
+
+			if source.State() != openal.Playing {
+				source.Play()
+			}
+		}
+		reclaim()
+		emptyBufs.Delete()
+		source.Delete()
+	}(e)
 }
 
 func (s *Stream) sourceRoutine(inputDevice *string) {
-    interval := s.client.Config.AudioInterval
-    frameSize := s.client.Config.AudioFrameSize()
+	interval := s.client.Config.AudioInterval
+	frameSize := s.client.Config.AudioFrameSize()
 
-    if frameSize != s.sourceFrameSize {
-        s.deviceSource.CaptureCloseDevice()
-        s.sourceFrameSize = frameSize
-        // Always use mono for input
-        s.deviceSource = openal.CaptureOpenDevice(*inputDevice, gumble.AudioSampleRate, openal.FormatMono16, uint32(s.sourceFrameSize))
-    }
+	if frameSize != s.sourceFrameSize {
+		s.deviceSource.CaptureCloseDevice()
+		s.sourceFrameSize = frameSize
+		s.deviceSource = openal.CaptureOpenDevice(*inputDevice, gumble.AudioSampleRate, s.sourceFormat, uint32(s.sourceFrameSize))
+		if s.deviceSource == nil && s.sourceFormat == openal.FormatStereo16 {
+			s.sourceFormat = openal.FormatMono16
+			s.sourceChannels = 1
+			s.deviceSource = openal.CaptureOpenDevice(*inputDevice, gumble.AudioSampleRate, s.sourceFormat, uint32(s.sourceFrameSize))
+		}
+	}
+	if s.deviceSource == nil {
+		return
+	}
 
-    ticker := time.NewTicker(interval)
-    defer ticker.Stop()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
-    stop := s.sourceStop
+	stop := s.sourceStop
 
-    outgoing := s.client.AudioOutgoing()
-    defer close(outgoing)
+	outgoing := s.client.AudioOutgoing()
+	defer close(outgoing)
 
-    for {
-        select {
-        case <-stop:
-            return
-        case <-ticker.C:
-            // Initialize buffer with silence
-            int16Buffer := make([]int16, frameSize)
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			sampleCount := frameSize * s.sourceChannels
+			int16Buffer := make([]int16, sampleCount)
 
-            // Capture microphone if available
-            hasMicInput := false
-            buff := s.deviceSource.CaptureSamples(uint32(frameSize))
-            if len(buff) == frameSize*2 {
-                hasMicInput = true
-                for i := range int16Buffer {
-                    sample := int16(binary.LittleEndian.Uint16(buff[i*2:]))
-                    if s.micVolume != 1.0 {
-                        sample = int16(float32(sample) * s.micVolume)
-                    }
-                    int16Buffer[i] = sample
-                }
+			// Capture microphone if available
+			hasMicInput := false
+			buff := s.deviceSource.CaptureSamples(uint32(frameSize))
+			if len(buff) == sampleCount*2 {
+				hasMicInput = true
+				for i := 0; i < sampleCount; i++ {
+					sample := int16(binary.LittleEndian.Uint16(buff[i*2:]))
+					if s.micVolume != 1.0 {
+						sample = int16(float32(sample) * s.micVolume)
+					}
+					int16Buffer[i] = sample
+				}
 
-                // Apply noise suppression if available and enabled
-                if s.noiseProcessor != nil && s.noiseProcessor.IsEnabled() {
-                    s.noiseProcessor.ProcessSamples(int16Buffer)
-                }
+				if s.sourceChannels == 1 {
+					s.processMonoSamples(int16Buffer)
+				} else {
+					s.processStereoSamples(int16Buffer, frameSize)
+				}
+			}
 
-                // Apply AGC to outgoing microphone audio (always enabled)
-                if s.micAGC != nil {
-                    s.micAGC.ProcessSamples(int16Buffer)
-                }
+			// Mix with or use file audio if playing
+			hasFileAudio := false
+			var outputBuffer []int16
 
-                // Apply voice effects if available and enabled
-                if s.effectsProcessor != nil && s.effectsProcessor.IsEnabled() {
-                    s.effectsProcessor.ProcessSamples(int16Buffer)
-                }
-            }
+			if s.filePlayer != nil && s.filePlayer.IsPlaying() {
+				fileAudio := s.filePlayer.GetAudioFrame()
+				if fileAudio != nil && len(fileAudio) > 0 {
+					hasFileAudio = true
+					// File audio is stereo - send as stereo when file is playing
+					// Create stereo buffer (frameSize * 2 channels)
+					outputBuffer = make([]int16, frameSize*2)
 
-            // Mix with or use file audio if playing
-            hasFileAudio := false
-            var outputBuffer []int16
+					if hasMicInput {
+						if s.sourceChannels == 2 {
+							// Mix stereo mic with stereo file
+							for i := 0; i < frameSize; i++ {
+								idx := i * 2
+								if idx+1 < len(fileAudio) {
+									left := int32(int16Buffer[idx]) + int32(fileAudio[idx])
+									if left > 32767 {
+										left = 32767
+									} else if left < -32768 {
+										left = -32768
+									}
+									outputBuffer[idx] = int16(left)
 
-            if s.filePlayer != nil && s.filePlayer.IsPlaying() {
-                fileAudio := s.filePlayer.GetAudioFrame()
-                if fileAudio != nil && len(fileAudio) > 0 {
-                    hasFileAudio = true
-                    // File audio is stereo - send as stereo when file is playing
-                    // Create stereo buffer (frameSize * 2 channels)
-                    outputBuffer = make([]int16, frameSize*2)
+									right := int32(int16Buffer[idx+1]) + int32(fileAudio[idx+1])
+									if right > 32767 {
+										right = 32767
+									} else if right < -32768 {
+										right = -32768
+									}
+									outputBuffer[idx+1] = int16(right)
+								}
+							}
+						} else {
+							// Mix mono mic with stereo file
+							for i := 0; i < frameSize; i++ {
+								idx := i * 2
+								if idx+1 < len(fileAudio) {
+									left := int32(int16Buffer[i]) + int32(fileAudio[idx])
+									if left > 32767 {
+										left = 32767
+									} else if left < -32768 {
+										left = -32768
+									}
+									outputBuffer[idx] = int16(left)
 
-                    if hasMicInput {
-                        // Mix mono mic with stereo file
-                        for i := 0; i < frameSize; i++ {
-                            if i*2+1 < len(fileAudio) {
-                                // Left channel: mic + file left
-                                left := int32(int16Buffer[i]) + int32(fileAudio[i*2])
-                                if left > 32767 {
-                                    left = 32767
-                                } else if left < -32768 {
-                                    left = -32768
-                                }
-                                outputBuffer[i*2] = int16(left)
+									right := int32(int16Buffer[i]) + int32(fileAudio[idx+1])
+									if right > 32767 {
+										right = 32767
+									} else if right < -32768 {
+										right = -32768
+									}
+									outputBuffer[idx+1] = int16(right)
+								}
+							}
+						}
+					} else {
+						// Use file audio only (already stereo)
+						copy(outputBuffer, fileAudio[:frameSize*2])
+					}
+				}
+			}
 
-                                // Right channel: mic + file right
-                                right := int32(int16Buffer[i]) + int32(fileAudio[i*2+1])
-                                if right > 32767 {
-                                    right = 32767
-                                } else if right < -32768 {
-                                    right = -32768
-                                }
-                                outputBuffer[i*2+1] = int16(right)
-                            }
-                        }
-                    } else {
-                        // Use file audio only (already stereo)
-                        copy(outputBuffer, fileAudio[:frameSize*2])
-                    }
-                }
-            }
+			// Determine what to send
+			if hasFileAudio {
+				// Send stereo buffer when file is playing
+				outgoing <- gumble.AudioBuffer(outputBuffer)
+			} else if hasMicInput {
+				// Send mic when no file is playing
+				outgoing <- gumble.AudioBuffer(int16Buffer)
+			}
+		}
+	}
+}
 
-            // Determine what to send
-            if hasFileAudio {
-                // Send stereo buffer when file is playing
-                outgoing <- gumble.AudioBuffer(outputBuffer)
-            } else if hasMicInput {
-                // Send mono mic when no file is playing
-                outgoing <- gumble.AudioBuffer(int16Buffer)
-            }
-        }
-    }
+func (s *Stream) processMonoSamples(samples []int16) {
+	s.processChannel(samples, s.noiseProcessor, s.micAGC, s.effectsProcessor)
+}
+
+func (s *Stream) processStereoSamples(samples []int16, frameSize int) {
+	if frameSize == 0 || len(samples) < frameSize*2 {
+		return
+	}
+
+	s.ensureStereoProcessors()
+	s.syncStereoProcessors()
+
+	left := make([]int16, frameSize)
+	right := make([]int16, frameSize)
+
+	for i := 0; i < frameSize; i++ {
+		idx := i * 2
+		left[i] = samples[idx]
+		right[i] = samples[idx+1]
+	}
+
+	s.processChannel(left, s.noiseProcessor, s.micAGC, s.effectsProcessor)
+	s.processChannel(right, s.noiseProcessorRight, s.micAGCRight, s.effectsProcessorRight)
+
+	for i := 0; i < frameSize; i++ {
+		idx := i * 2
+		samples[idx] = left[i]
+		samples[idx+1] = right[i]
+	}
+}
+
+func (s *Stream) processChannel(samples []int16, noiseProcessor NoiseProcessor, micAGC *audio.AGC, effectsProcessor EffectsProcessor) {
+	if noiseProcessor != nil && noiseProcessor.IsEnabled() {
+		noiseProcessor.ProcessSamples(samples)
+	}
+	if micAGC != nil {
+		micAGC.ProcessSamples(samples)
+	}
+	if effectsProcessor != nil && effectsProcessor.IsEnabled() {
+		effectsProcessor.ProcessSamples(samples)
+	}
+}
+
+func (s *Stream) ensureStereoProcessors() {
+	if s.micAGCRight == nil {
+		s.micAGCRight = audio.NewAGC()
+	}
+	if s.noiseProcessorRight == nil {
+		s.noiseProcessorRight = cloneNoiseProcessor(s.noiseProcessor)
+	}
+	if s.effectsProcessorRight == nil {
+		s.effectsProcessorRight = cloneEffectsProcessor(s.effectsProcessor)
+	}
+}
+
+func (s *Stream) syncStereoProcessors() {
+	leftSuppressor, leftOk := s.noiseProcessor.(*noise.Suppressor)
+	rightSuppressor, rightOk := s.noiseProcessorRight.(*noise.Suppressor)
+	if leftOk && rightOk {
+		if leftSuppressor.IsEnabled() != rightSuppressor.IsEnabled() {
+			rightSuppressor.SetEnabled(leftSuppressor.IsEnabled())
+		}
+		if leftSuppressor.GetThreshold() != rightSuppressor.GetThreshold() {
+			rightSuppressor.SetThreshold(leftSuppressor.GetThreshold())
+		}
+	}
+
+	leftEffects, leftOk := s.effectsProcessor.(*audio.EffectsProcessor)
+	rightEffects, rightOk := s.effectsProcessorRight.(*audio.EffectsProcessor)
+	if leftOk && rightOk {
+		if leftEffects.IsEnabled() != rightEffects.IsEnabled() {
+			rightEffects.SetEnabled(leftEffects.IsEnabled())
+		}
+		if leftEffects.GetCurrentEffect() != rightEffects.GetCurrentEffect() {
+			rightEffects.SetEffect(leftEffects.GetCurrentEffect())
+		}
+	}
+}
+
+func cloneNoiseProcessor(np NoiseProcessor) NoiseProcessor {
+	if np == nil {
+		return nil
+	}
+	if suppressor, ok := np.(*noise.Suppressor); ok {
+		clone := noise.NewSuppressor()
+		clone.SetEnabled(suppressor.IsEnabled())
+		clone.SetThreshold(suppressor.GetThreshold())
+		return clone
+	}
+	return nil
+}
+
+func cloneEffectsProcessor(ep EffectsProcessor) EffectsProcessor {
+	if ep == nil {
+		return nil
+	}
+	if processor, ok := ep.(*audio.EffectsProcessor); ok {
+		clone := audio.NewEffectsProcessor(gumble.AudioSampleRate)
+		clone.SetEnabled(processor.IsEnabled())
+		clone.SetEffect(processor.GetCurrentEffect())
+		return clone
+	}
+	return nil
 }
