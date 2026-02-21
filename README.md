@@ -44,7 +44,7 @@ Barnard includes real-time noise suppression for microphone input to filter out 
 
 ### Features
 - **Real-time processing**: Noise suppression is applied during audio capture with minimal latency
-- **Configurable threshold**: Adjustable noise gate threshold (default: 0.02)
+- **Configurable amount**: Adjustable suppression amount via threshold value (default: `0.08`)
 - **Persistent settings**: Noise suppression preferences are saved in your configuration file
 - **Multiple control methods**: Toggle via hotkey, command line flag, or FIFO commands
 
@@ -57,10 +57,11 @@ Barnard includes real-time noise suppression for microphone input to filter out 
 ### Configuration Example
 ```toml
 noisesuppressionenabled = true
-noisesuppressionthreshold = 0.02
+noisesuppressionthreshold = 0.08
 ```
 
-The noise suppression algorithm uses a combination of high-pass filtering and noise gating to reduce unwanted background sounds while preserving voice quality.
+`noisesuppressionthreshold` accepts values from `0.0` to `1.0`, where higher values apply stronger suppression.
+The noise suppression algorithm uses adaptive noise-floor tracking, transient suppression, and smoothed gain reduction to reduce background noise while preserving voice quality.
 
 ## FIFO Control
 

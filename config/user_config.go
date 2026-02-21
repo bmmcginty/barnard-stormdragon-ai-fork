@@ -128,7 +128,7 @@ func (c *Config) LoadConfig() {
 		jc.NoiseSuppressionEnabled = &enabled
 	}
 	if c.config.NoiseSuppressionThreshold == nil {
-		threshold := float32(0.02)
+		threshold := float32(0.08)
 		jc.NoiseSuppressionThreshold = &threshold
 	}
 	if c.config.VoiceEffect == nil {
@@ -249,12 +249,25 @@ func (c *Config) SetNoiseSuppressionEnabled(enabled bool) {
 
 func (c *Config) GetNoiseSuppressionThreshold() float32 {
 	if c.config.NoiseSuppressionThreshold == nil {
-		return 0.02
+		return 0.08
 	}
-	return *c.config.NoiseSuppressionThreshold
+	threshold := *c.config.NoiseSuppressionThreshold
+	if threshold < 0.0 {
+		return 0.0
+	}
+	if threshold > 1.0 {
+		return 1.0
+	}
+	return threshold
 }
 
 func (c *Config) SetNoiseSuppressionThreshold(threshold float32) {
+	if threshold < 0.0 {
+		threshold = 0.0
+	}
+	if threshold > 1.0 {
+		threshold = 1.0
+	}
 	c.config.NoiseSuppressionThreshold = &threshold
 	c.SaveConfig()
 }
