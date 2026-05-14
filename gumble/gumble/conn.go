@@ -10,7 +10,7 @@ import (
 
 	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
 	"git.stormux.org/storm/barnard/gumble/gumble/varint"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 // DefaultPort is the default port on which Mumble servers listen.

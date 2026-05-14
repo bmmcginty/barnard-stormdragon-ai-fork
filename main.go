@@ -2,7 +2,10 @@ package main
 
 import _ "net/http/pprof"
 import (
+	"al.essio.dev/pkg/shellescape"
 	"bufio"
+	"crypto/tls"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -11,18 +14,13 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
-	//"gopkg.in/alessio/shellescape.v1"
-	//"github.com/google/shlex"
-	"crypto/tls"
-	"flag"
+
 	"git.stormux.org/storm/barnard/audio"
 	"git.stormux.org/storm/barnard/config"
-	"git.stormux.org/storm/barnard/noise"
-	"github.com/alessio/shellescape"
-
 	"git.stormux.org/storm/barnard/gumble/go-openal/openal"
 	"git.stormux.org/storm/barnard/gumble/gumble"
 	_ "git.stormux.org/storm/barnard/gumble/opus"
+	"git.stormux.org/storm/barnard/noise"
 	"git.stormux.org/storm/barnard/uiterm"
 )
 

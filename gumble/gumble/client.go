@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 // State is the current state of the client's connection to the server.
@@ -119,7 +119,7 @@ func DialWithDialer(dialer *net.Dialer, config *Config, tlsConfig *tls.Config) (
 
 	// Initial packets
 	versionPacket := MumbleProto.Version{
-		Version:   proto.Uint32(ClientVersion),
+		VersionV1: proto.Uint32(ClientVersion),
 		Release:   proto.String("gumble"),
 		Os:        proto.String(runtime.GOOS),
 		OsVersion: proto.String(runtime.GOARCH),

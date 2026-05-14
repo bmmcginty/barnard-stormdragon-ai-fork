@@ -2,7 +2,7 @@ package gumble
 
 import (
 	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 // ACL contains a list of ACLGroups and ACLRules linked to a channel.

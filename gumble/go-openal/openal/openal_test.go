@@ -7,9 +7,15 @@ import (
 
 func TestGetVendor(t *testing.T) {
 	device := openal.OpenDevice("")
+	if device == nil {
+		t.Skip("OpenAL device is not available")
+	}
 	defer device.CloseDevice()
 
 	context := device.CreateContext()
+	if context == nil {
+		t.Skip("OpenAL context is not available")
+	}
 	defer context.Destroy()
 	context.Activate()
 

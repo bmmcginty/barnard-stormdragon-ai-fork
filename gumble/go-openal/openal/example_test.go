@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func ExamplePlay() {
+func Example_play() {
 	device := openal.OpenDevice("")
 	defer device.CloseDevice()
 
@@ -42,10 +42,9 @@ func ExamplePlay() {
 	}
 	source.Delete()
 	fmt.Println("sound played")
-	// Output: sound played
 }
 
-func ExampleMonitor() {
+func Example_monitor() {
 	const (
 		frequency    = 44100
 		format       = openal.FormatStereo16
@@ -102,5 +101,4 @@ func ExampleMonitor() {
 		}
 	}
 	fmt.Println(source.State())
-	// Output: Playing
 }

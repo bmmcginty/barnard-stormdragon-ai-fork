@@ -2,7 +2,7 @@ package gumble
 
 import (
 	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 // Channel represents a channel in the server's channel tree.
@@ -102,15 +102,18 @@ func (c *Channel) SetMaxUsers(maxUsers uint32) {
 // is equal to the arguments passed.
 //
 // For example, given the following server channel tree:
-//         Root
-//           Child 1
-//           Child 2
-//             Child 2.1
-//             Child 2.2
-//               Child 2.2.1
-//           Child 3
+//
+//	Root
+//	  Child 1
+//	  Child 2
+//	    Child 2.1
+//	    Child 2.2
+//	      Child 2.2.1
+//	  Child 3
+//
 // To get the "Child 2.2.1" channel:
-//         root.Find("Child 2", "Child 2.2", "Child 2.2.1")
+//
+//	root.Find("Child 2", "Child 2.2", "Child 2.2.1")
 func (c *Channel) Find(names ...string) *Channel {
 	if len(names) == 0 {
 		return c
