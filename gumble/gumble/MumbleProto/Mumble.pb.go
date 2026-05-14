@@ -6,9 +6,11 @@
 Package MumbleProto is a generated protocol buffer package.
 
 It is generated from these files:
+
 	Mumble.proto
 
 It has these top-level messages:
+
 	Version
 	UDPTunnel
 	Authenticate
@@ -2070,8 +2072,10 @@ type ServerConfig struct {
 	// Maximum image message length.
 	ImageMessageLength *uint32 `protobuf:"varint,5,opt,name=image_message_length,json=imageMessageLength" json:"image_message_length,omitempty"`
 	// The maximum number of users allowed on the server.
-	MaxUsers         *uint32 `protobuf:"varint,6,opt,name=max_users,json=maxUsers" json:"max_users,omitempty"`
-	XXX_unrecognized []byte  `json:"-"`
+	MaxUsers *uint32 `protobuf:"varint,6,opt,name=max_users,json=maxUsers" json:"max_users,omitempty"`
+	// Whether using Mumble's recording feature is allowed on the server.
+	RecordingAllowed *bool  `protobuf:"varint,7,opt,name=recording_allowed,json=recordingAllowed" json:"recording_allowed,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
 }
 
 func (m *ServerConfig) Reset()                    { *m = ServerConfig{} }
@@ -2119,6 +2123,13 @@ func (m *ServerConfig) GetMaxUsers() uint32 {
 		return *m.MaxUsers
 	}
 	return 0
+}
+
+func (m *ServerConfig) GetRecordingAllowed() bool {
+	if m != nil && m.RecordingAllowed != nil {
+		return *m.RecordingAllowed
+	}
+	return false
 }
 
 // Sent by the server to inform the clients of suggested client configuration

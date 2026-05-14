@@ -77,7 +77,26 @@ Current Commands:
 * toggle: Toggle your transmission state.
 * talk: Synonym for toggle.
 * noise: Toggle noise suppression on/off for microphone input.
+* record: Toggle recording. You may also use `record start` or `record stop`.
 * exit: Exit Barnard, just like when you press your quit key.
+
+## Recording
+
+Barnard can record a single mixed file containing the audio you hear and the audio you transmit.
+Recording uses the Mumble recording state so other users are notified by the server.
+If the server reports that recording is not allowed, Barnard refuses to start and prints a clear message.
+
+Recordings are saved in `~/Audio` by default. The directory is created if it does not exist.
+The default file name is `barnard-recording-YYYYMMDD-HHMMSS.flac`.
+
+Recording settings in `~/.barnard.toml`:
+
+```toml
+recordingformat = "flac"
+recordingdirectory = "~/Audio"
+```
+
+`recordingformat` may be `flac` or `opus`. Barnard uses `ffmpeg` to encode recordings.
 
 ## Event Notification
 
@@ -225,6 +244,7 @@ After running the command above, `barnard` will be compiled as `$(go env GOPATH)
 - <kbd>F1</kbd>: toggle voice transmission
 - <kbd>F9</kbd>: toggle noise suppression
 - <kbd>F12</kbd>: cycle through voice effects
+- <kbd>Ctrl+R</kbd>: toggle recording
 - <kbd>Ctrl+L</kbd>: clear chat log
 - <kbd>Tab</kbd>: toggle focus between chat and user tree
 - <kbd>Page Up</kbd>: scroll chat up

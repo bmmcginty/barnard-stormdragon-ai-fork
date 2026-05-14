@@ -210,6 +210,7 @@ type ServerConfigEvent struct {
 	MaximumMessageLength      *int
 	MaximumImageMessageLength *int
 	MaximumUsers              *int
+	RecordingAllowed          *bool
 
 	CodecAlpha       *int32
 	CodecBeta        *int32

@@ -467,6 +467,7 @@ func (c *Client) handleUserRemove(buffer []byte) error {
 			event.Type |= UserChangeBanned
 		}
 		if event.User == c.Self {
+			c.disconnectEvent.String = event.String
 			if packet.Ban != nil && *packet.Ban {
 				c.disconnectEvent.Type = DisconnectBanned
 			} else {
@@ -1236,7 +1237,54 @@ func (c *Client) handleServerConfig(buffer []byte) error {
 		val := int(*packet.MaxUsers)
 		event.MaximumUsers = &val
 	}
+	if packet.RecordingAllowed != nil {
+		event.RecordingAllowed = packet.RecordingAllowed
+	} else if val := parseServerConfigRecordingAllowed(buffer); val != nil {
+		event.RecordingAllowed = val
+	}
 	c.Config.Listeners.onServerConfig(&event)
+	return nil
+}
+
+func parseServerConfigRecordingAllowed(buffer []byte) *bool {
+	for len(buffer) > 0 {
+		key, n := varint.Decode(buffer)
+		if n <= 0 {
+			return nil
+		}
+		buffer = buffer[n:]
+		field := key >> 3
+		wireType := key & 0x7
+		if field == 7 && wireType == 0 {
+			val, n := varint.Decode(buffer)
+			if n <= 0 {
+				return nil
+			}
+			allowed := val != 0
+			return &allowed
+		}
+		skip := 0
+		switch wireType {
+		case 0:
+			_, skip = varint.Decode(buffer)
+		case 1:
+			skip = 8
+		case 2:
+			length, n := varint.Decode(buffer)
+			if n <= 0 || length < 0 {
+				return nil
+			}
+			skip = n + int(length)
+		case 5:
+			skip = 4
+		default:
+			return nil
+		}
+		if skip <= 0 || skip > len(buffer) {
+			return nil
+		}
+		buffer = buffer[skip:]
+	}
 	return nil
 }
 
