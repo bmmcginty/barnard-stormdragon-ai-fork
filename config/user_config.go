@@ -31,6 +31,8 @@ type exportableConfig struct {
 	NoiseSuppressionThreshold *float32
 	VoiceEffect               *int
 	Certificate               *string
+	RecordingFormat           *string
+	RecordingDirectory        *string
 }
 
 type server struct {
@@ -75,6 +77,7 @@ func (c *Config) LoadConfig() {
 		VolumeUp:               key(uiterm.KeyF6),
 		VolumeReset:            key(uiterm.KeyF8),
 		MuteToggle:             key(uiterm.KeyF7), // Added mute toggle hotkey
+		RecordToggle:           key(uiterm.KeyCtrlR),
 		Exit:                   key(uiterm.KeyF10),
 		ToggleTimestamps:       key(uiterm.KeyF3),
 		SwitchViews:            key(uiterm.KeyTab),
@@ -95,6 +98,7 @@ func (c *Config) LoadConfig() {
 		}
 	}
 	c.config = &jc
+	c.ensureHotkeys()
 	if c.config.MicVolume == nil {
 		micvol := float32(1.0)
 		jc.MicVolume = &micvol
@@ -138,6 +142,75 @@ func (c *Config) LoadConfig() {
 	if c.config.Certificate == nil {
 		cert := string("")
 		jc.Certificate = &cert
+	}
+	if c.config.RecordingFormat == nil {
+		format := string("flac")
+		jc.RecordingFormat = &format
+	}
+	if c.config.RecordingDirectory == nil {
+		dir := string("~/Audio")
+		jc.RecordingDirectory = &dir
+	}
+}
+
+func (c *Config) ensureHotkeys() {
+	if c.config.Hotkeys == nil {
+		c.config.Hotkeys = &Hotkeys{}
+	}
+	defaults := Hotkeys{
+		Talk:                   key(uiterm.KeyF1),
+		VolumeDown:             key(uiterm.KeyF5),
+		VolumeUp:               key(uiterm.KeyF6),
+		VolumeReset:            key(uiterm.KeyF8),
+		MuteToggle:             key(uiterm.KeyF7),
+		RecordToggle:           key(uiterm.KeyCtrlR),
+		Exit:                   key(uiterm.KeyF10),
+		ToggleTimestamps:       key(uiterm.KeyF3),
+		SwitchViews:            key(uiterm.KeyTab),
+		ScrollUp:               key(uiterm.KeyPgup),
+		ScrollDown:             key(uiterm.KeyPgdn),
+		NoiseSuppressionToggle: key(uiterm.KeyF9),
+		CycleVoiceEffect:       key(uiterm.KeyF12),
+	}
+	hotkeys := c.config.Hotkeys
+	if hotkeys.Talk == nil {
+		hotkeys.Talk = defaults.Talk
+	}
+	if hotkeys.VolumeDown == nil {
+		hotkeys.VolumeDown = defaults.VolumeDown
+	}
+	if hotkeys.VolumeUp == nil {
+		hotkeys.VolumeUp = defaults.VolumeUp
+	}
+	if hotkeys.VolumeReset == nil {
+		hotkeys.VolumeReset = defaults.VolumeReset
+	}
+	if hotkeys.MuteToggle == nil {
+		hotkeys.MuteToggle = defaults.MuteToggle
+	}
+	if hotkeys.RecordToggle == nil {
+		hotkeys.RecordToggle = defaults.RecordToggle
+	}
+	if hotkeys.Exit == nil {
+		hotkeys.Exit = defaults.Exit
+	}
+	if hotkeys.ToggleTimestamps == nil {
+		hotkeys.ToggleTimestamps = defaults.ToggleTimestamps
+	}
+	if hotkeys.SwitchViews == nil {
+		hotkeys.SwitchViews = defaults.SwitchViews
+	}
+	if hotkeys.ScrollUp == nil {
+		hotkeys.ScrollUp = defaults.ScrollUp
+	}
+	if hotkeys.ScrollDown == nil {
+		hotkeys.ScrollDown = defaults.ScrollDown
+	}
+	if hotkeys.NoiseSuppressionToggle == nil {
+		hotkeys.NoiseSuppressionToggle = defaults.NoiseSuppressionToggle
+	}
+	if hotkeys.CycleVoiceEffect == nil {
+		hotkeys.CycleVoiceEffect = defaults.CycleVoiceEffect
 	}
 }
 
@@ -282,6 +355,20 @@ func (c *Config) GetVoiceEffect() int {
 func (c *Config) SetVoiceEffect(effect int) {
 	c.config.VoiceEffect = &effect
 	c.SaveConfig()
+}
+
+func (c *Config) GetRecordingFormat() string {
+	if c.config.RecordingFormat == nil {
+		return "flac"
+	}
+	return strings.ToLower(strings.TrimSpace(*c.config.RecordingFormat))
+}
+
+func (c *Config) GetRecordingDirectory() string {
+	if c.config.RecordingDirectory == nil {
+		return resolvePath("~/Audio")
+	}
+	return resolvePath(*c.config.RecordingDirectory)
 }
 
 func (c *Config) UpdateUser(u *gumble.User) {

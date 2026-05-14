@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"os/exec"
+	"sync"
 	"time"
 
 	"git.stormux.org/storm/barnard/audio"
@@ -29,6 +30,12 @@ type FilePlayer interface {
 	GetAudioFrame() []int16
 	IsPlaying() bool
 }
+
+type Recorder interface {
+	RecordAudioFrame(source uint32, samples []int16)
+}
+
+const recorderOutgoingSource uint32 = ^uint32(0)
 
 const (
 	maxBufferSize = 11520 // Max frame size (2880) * bytes per stereo sample (4)
@@ -72,6 +79,8 @@ type Stream struct {
 	effectsProcessor      EffectsProcessor
 	effectsProcessorRight EffectsProcessor
 	filePlayer            FilePlayer
+	recorderMu            sync.RWMutex
+	recorder              Recorder
 }
 
 func New(client *gumble.Client, inputDevice *string, outputDevice *string, test bool) (*Stream, error) {
@@ -159,6 +168,18 @@ func (s *Stream) SetFilePlayer(fp FilePlayer) {
 
 func (s *Stream) GetFilePlayer() FilePlayer {
 	return s.filePlayer
+}
+
+func (s *Stream) SetRecorder(recorder Recorder) {
+	s.recorderMu.Lock()
+	defer s.recorderMu.Unlock()
+	s.recorder = recorder
+}
+
+func (s *Stream) getRecorder() Recorder {
+	s.recorderMu.RLock()
+	defer s.recorderMu.RUnlock()
+	return s.recorder
 }
 
 func (s *Stream) Destroy() {
@@ -265,6 +286,12 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 			}
 
 			boost = e.User.Boost
+			recorder := s.getRecorder()
+			var recordBuffer []int16
+			recordPtr := 0
+			if recorder != nil {
+				recordBuffer = make([]int16, len(packet.AudioBuffer)*gumble.AudioChannels)
+			}
 
 			// Check if sample count suggests stereo data
 			isStereo := samples > gumble.AudioDefaultFrameSize && samples%2 == 0
@@ -290,6 +317,10 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 							sample = int16(boosted)
 						}
 					}
+					if recorder != nil {
+						recordBuffer[recordPtr] = scaleForRecording(sample, e.User.Volume)
+						recordPtr++
+					}
 					binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
 					rawPtr += 2
 
@@ -304,6 +335,10 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 						} else {
 							sample = int16(boosted)
 						}
+					}
+					if recorder != nil {
+						recordBuffer[recordPtr] = scaleForRecording(sample, e.User.Volume)
+						recordPtr++
 					}
 					binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
 					rawPtr += 2
@@ -322,9 +357,18 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 							sample = int16(boosted)
 						}
 					}
+					if recorder != nil {
+						recordSample := scaleForRecording(sample, e.User.Volume)
+						recordBuffer[recordPtr] = recordSample
+						recordBuffer[recordPtr+1] = recordSample
+						recordPtr += 2
+					}
 					binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
 					rawPtr += 2
 				}
+			}
+			if recorder != nil && recordPtr > 0 {
+				recorder.RecordAudioFrame(e.User.Session, recordBuffer[:recordPtr])
 			}
 
 			reclaim()
@@ -472,12 +516,29 @@ func (s *Stream) sourceRoutine(inputDevice *string) {
 			if hasFileAudio {
 				// Send stereo buffer when file is playing
 				outgoing <- gumble.AudioBuffer(outputBuffer)
+				if recorder := s.getRecorder(); recorder != nil {
+					recorder.RecordAudioFrame(recorderOutgoingSource, outputBuffer)
+				}
 			} else if hasMicInput {
 				// Send mic when no file is playing
 				outgoing <- gumble.AudioBuffer(int16Buffer)
+				if recorder := s.getRecorder(); recorder != nil {
+					recorder.RecordAudioFrame(recorderOutgoingSource, int16Buffer)
+				}
 			}
 		}
 	}
+}
+
+func scaleForRecording(sample int16, volume float32) int16 {
+	scaled := int32(float32(sample) * volume)
+	if scaled > 32767 {
+		return 32767
+	}
+	if scaled < -32768 {
+		return -32768
+	}
+	return int16(scaled)
 }
 
 func (s *Stream) processMonoSamples(samples []int16) {
