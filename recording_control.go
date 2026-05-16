@@ -42,12 +42,14 @@ func (b *Barnard) ToggleRecording() {
 func (b *Barnard) StartRecording() {
 	if b.Client == nil || b.Client.Self == nil {
 		b.AddOutputLine("Recording requires an active server connection")
+		b.Notify("recorderror", "me", "Recording requires an active server connection")
 		return
 	}
 	b.RecordingMutex.Lock()
 	if b.recordingAllowed != nil && !*b.recordingAllowed {
 		b.RecordingMutex.Unlock()
 		b.AddOutputLine("Recording is not allowed by this server.")
+		b.Notify("recorderror", "me", "Recording is not allowed by this server.")
 		return
 	}
 	if b.Recorder != nil || b.recordingStarting {
@@ -60,6 +62,7 @@ func (b *Barnard) StartRecording() {
 
 	b.Client.Self.SetRecording(true)
 	b.AddOutputLine("Recording start requested")
+	b.renderGeneralStatus()
 }
 
 func (b *Barnard) StopRecording(notifyServer bool) {
@@ -70,20 +73,25 @@ func (b *Barnard) StopRecording(notifyServer bool) {
 		}
 		if wasPending {
 			b.AddOutputLine("Recording start cancelled")
+			b.Notify("recordstop", "me", "Recording start cancelled")
 		} else {
 			b.AddOutputLine("Recording is not active")
 		}
+		b.renderGeneralStatus()
 		return
 	}
 
 	if err := recorder.Stop(); err != nil {
 		b.AddOutputLine(fmt.Sprintf("Recording stopped with error: %s", err))
+		b.Notify("recorderror", "me", err.Error())
 	} else {
 		b.AddOutputLine(fmt.Sprintf("Recording saved: %s", path))
+		b.Notify("recordstop", "me", path)
 	}
 	if notifyServer && b.Client != nil && b.Client.Self != nil {
 		b.Client.Self.SetRecording(false)
 	}
+	b.renderGeneralStatus()
 }
 
 func (b *Barnard) StopRecordingIfActive(notifyServer bool) {
@@ -114,8 +122,10 @@ func (b *Barnard) HandleRecordingChange(e *gumble.UserChangeEvent) {
 	}
 	if e.User.Recording {
 		b.AddOutputLine(fmt.Sprintf("%s started recording", e.User.Name))
+		b.Notify("userrecordstart", e.User.Name, "")
 	} else {
 		b.AddOutputLine(fmt.Sprintf("%s stopped recording", e.User.Name))
+		b.Notify("userrecordstop", e.User.Name, "")
 	}
 }
 
@@ -130,6 +140,7 @@ func (b *Barnard) HandleRecordingAllowed(allowed *bool) {
 	b.RecordingMutex.Unlock()
 	if !value && active {
 		b.AddOutputLine("Recording is not allowed by this server.")
+		b.Notify("recorderror", "me", "Recording is not allowed by this server.")
 		b.StopRecording(true)
 	}
 }
@@ -154,7 +165,9 @@ func (b *Barnard) finishRecordingStart() {
 		b.recordingStarting = false
 		b.RecordingMutex.Unlock()
 		b.AddOutputLine(fmt.Sprintf("Could not start recording: %s", err))
+		b.Notify("recorderror", "me", err.Error())
 		b.Client.Self.SetRecording(false)
+		b.renderGeneralStatus()
 		return
 	}
 
@@ -171,6 +184,14 @@ func (b *Barnard) finishRecordingStart() {
 		b.Stream.SetRecorder(recorder)
 	}
 	b.AddOutputLine(fmt.Sprintf("Recording started: %s", recorder.Path()))
+	b.Notify("recordstart", "me", recorder.Path())
+	b.renderGeneralStatus()
+}
+
+func (b *Barnard) isRecordingActive() bool {
+	b.RecordingMutex.Lock()
+	defer b.RecordingMutex.Unlock()
+	return b.Recorder != nil || b.recordingStarting
 }
 
 func (b *Barnard) detachRecorder() (*recording.Recorder, string, bool) {
@@ -191,10 +212,15 @@ func (b *Barnard) detachRecorder() (*recording.Recorder, string, bool) {
 }
 
 func (b *Barnard) stopRecordingForDisconnect() {
-	recorder, _, _ := b.detachRecorder()
+	recorder, path, _ := b.detachRecorder()
 	if recorder != nil {
 		if err := recorder.Stop(); err != nil {
 			b.AddOutputLine(fmt.Sprintf("Recording stopped with error: %s", err))
+			b.Notify("recorderror", "me", err.Error())
+		} else {
+			b.AddOutputLine(fmt.Sprintf("Recording saved: %s", path))
+			b.Notify("recordstop", "me", path)
 		}
 	}
+	b.renderGeneralStatus()
 }

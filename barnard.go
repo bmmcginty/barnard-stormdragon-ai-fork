@@ -40,6 +40,8 @@ type Barnard struct {
 	UiInputStatus   uiterm.Label
 	SelectedChannel *gumble.Channel
 	selectedUser    *gumble.User
+	statusText      string
+	statusNotice    bool
 
 	notifyChannel chan []string
 

@@ -115,12 +115,30 @@ func (b *Barnard) OnVoiceEffectCycle(ui *uiterm.Ui, key uiterm.Key) {
 }
 
 func (b *Barnard) UpdateGeneralStatus(text string, notice bool) {
+	b.statusText = text
+	b.statusNotice = notice
+	b.renderGeneralStatus()
+}
+
+func (b *Barnard) renderGeneralStatus() {
+	text := b.statusText
+	notice := b.statusNotice
 	if notice {
 		b.UiStatus.Fg = uiterm.ColorWhite | uiterm.AttrBold
 		b.UiStatus.Bg = uiterm.ColorRed
 	} else {
 		b.UiStatus.Fg = uiterm.ColorBlack
 		b.UiStatus.Bg = uiterm.ColorWhite
+	}
+	if b.isRecordingActive() {
+		switch strings.TrimSpace(text) {
+		case "Idle":
+			text = " Idle Rec "
+		case "Tx":
+			text = " Tx Rec "
+		case "File":
+			text = " File Rec "
+		}
 	}
 	b.UiStatus.Text = text
 	b.Ui.Refresh()
@@ -423,6 +441,8 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
 		Fg:   uiterm.ColorBlack,
 		Bg:   uiterm.ColorWhite,
 	}
+	b.statusText = b.UiStatus.Text
+	b.statusNotice = false
 	ui.Add(uiViewStatus, &b.UiStatus)
 
 	b.UiInput = uiterm.Textbox{

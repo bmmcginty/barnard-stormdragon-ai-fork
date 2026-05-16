@@ -22,6 +22,7 @@
 #
 #--code--
                                                                                                                                                                 
+# shellcheck disable=SC2329
 # 1 is off, 0 is on
 notify=0
 sound=0
@@ -68,22 +69,67 @@ msg() {
     [[ $notify ]] && notify "$1 from $2: $3"
 }
 
-notify() {
-if [[ "$notifyType" == "notify-send" ]]; then
-    notify-send "$@"
-else
+notify_fenrir() {
+    local message="$1"
+    local socatFile=""
+    if ! command -v socat > /dev/null 2>&1; then
+        return 1
+    fi
     if [[ -e "/tmp/fenrirscreenreader-deamon.sock" ]]; then
         socatFile="/tmp/fenrirscreenreader-deamon.sock"
     else
         socatFile="$(find /tmp/ -maxdepth 1 -type s -name 'fenrirscreenreader-*.sock' | head -1)"
     fi
-    echo "command say $@" | socat - UNIX-CLIENT:$socatFile
-fi
+    if [[ -z "$socatFile" ]]; then
+        return 1
+    fi
+    printf 'command say %s\n' "$message" | socat - "UNIX-CLIENT:$socatFile" > /dev/null 2>&1
+}
+
+notify_speech() {
+    local message="$1"
+    if command -v spd-say > /dev/null 2>&1; then
+        spd-say "$message" > /dev/null 2>&1 && return 0
+    fi
+    if command -v espeak-ng > /dev/null 2>&1; then
+        espeak-ng "$message" > /dev/null 2>&1 && return 0
+    fi
+    return 1
+}
+
+notify() {
+    local message="$*"
+    if [[ "$notifyType" == "notify-send" ]]; then
+        command -v notify-send > /dev/null 2>&1 && notify-send "$@" && return 0
+    else
+        notify_fenrir "$message" && return 0
+    fi
+    notify_speech "$message" || true
 }
 
 pm() {
     [[ $sound ]] && play -n synth .5 sin 440 sin 480 remix - norm -8
     [[ $notify ]] && notify "$1 from $2: $3"
+}
+
+recordstart() {
+    [[ $notify ]] && notify "Recording started."
+}
+
+recordstop() {
+    [[ $notify ]] && notify "Recording stopped."
+}
+
+recorderror() {
+    [[ $notify ]] && notify "Recording error: $3"
+}
+
+userrecordstart() {
+    [[ $notify ]] && notify "$2 started recording."
+}
+
+userrecordstop() {
+    [[ $notify ]] && notify "$2 stopped recording."
 }
 
 status() {

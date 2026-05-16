@@ -111,8 +111,13 @@ Each event has the following parameters:
     - disconnect: you have disconnected from a server
     - msg: the channel you are currently connected to has received a message
     - pm: you have received a private message
+    - recordstart: you have started recording
+    - recordstop: you have stopped recording
+    - recorderror: recording could not start or stopped with an error
+    - userrecordstart: another user has started recording
+    - userrecordstop: another user has stopped recording
 * who: the person causing initiation of the event ("me" for self-generated events)
-* what: the body of the event as applicable (message, channel name, etc)
+* what: the body of the event as applicable (message, channel name, recording path, error, etc)
 
 Warning:
 Keep in mind that Barnard opens an Alsa sound device when starting.
