@@ -29,4 +29,10 @@ func TestConfigBackfillsRecordingDefaults(t *testing.T) {
 	if got := *cfg.GetHotkeys().RecordToggle; got != uiterm.KeyCtrlR {
 		t.Fatalf("expected record toggle ctrl_r, got %s", got)
 	}
+	if cfg.GetHotkeys().AdminMenu == nil {
+		t.Fatal("expected admin menu hotkey to be backfilled")
+	}
+	if got := *cfg.GetHotkeys().AdminMenu; got != uiterm.KeyF11 {
+		t.Fatalf("expected admin menu f11, got %s", got)
+	}
 }

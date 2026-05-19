@@ -194,6 +194,25 @@ When in the treeview, pressing:
 * enter on de-selected user selects that user for PM mode.
 * enter on selected user de-selects the user
 * enter on a channel de-selects any selected users (if any) and moves you to the specified channel.
+* f11 opens the actions menu for the focused user or channel.
+
+The actions menu is a plain tree view for screen reader accessibility. It starts with non-privileged information actions, such as requesting user comments, user stats, channel descriptions, and channel permissions. If Barnard has permission information showing that you cannot perform an admin action, that privileged action is hidden. The server still remains the final authority and will reject actions if permissions are missing or stale. Destructive actions such as kick, ban, channel deletion, deregister, and raw ACL edits prompt in the input line before sending. Press Escape to close the menu or cancel an active prompt.
+
+Admin actions are also available through `/admin` commands and the FIFO command interface. Examples:
+
+* `/admin menu`
+* `/admin kick Username reason for kick`
+* `/admin ban Username reason for ban`
+* `/admin mute Username on`
+* `/admin deafen Username off`
+* `/admin suppress Username toggle`
+* `/admin move Username ChannelName`
+* `/admin banlist`
+* `/admin unban 1`
+* `/admin users`
+* `/admin acl request ChannelName`
+* `/admin acl grant mute_deafen user 123`
+* `/admin context action_name user Username`
 
 ## Volume
 
@@ -248,6 +267,7 @@ After running the command above, `barnard` will be compiled as `$(go env GOPATH)
 
 - <kbd>F1</kbd>: toggle voice transmission
 - <kbd>F9</kbd>: toggle noise suppression
+- <kbd>F11</kbd>: open actions menu for the focused tree item
 - <kbd>F12</kbd>: cycle through voice effects
 - <kbd>Ctrl+R</kbd>: toggle recording
 - <kbd>Ctrl+L</kbd>: clear chat log

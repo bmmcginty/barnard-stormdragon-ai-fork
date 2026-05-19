@@ -21,6 +21,7 @@ const (
 	uiViewInputStatus = "inputstatus"
 	uiViewOutput      = "output"
 	uiViewTree        = "tree"
+	uiViewAdmin       = "admin"
 )
 
 func Beep() {
@@ -359,7 +360,7 @@ func (b *Barnard) OnFocusPress(ui *uiterm.Ui, key uiterm.Key) {
 	active := b.Ui.Active()
 	if active == uiViewInput {
 		b.Ui.SetActive(uiViewTree)
-	} else if active == uiViewTree {
+	} else if active == uiViewTree || active == uiViewAdmin {
 		b.Ui.SetActive(uiViewInput)
 	}
 	width, height := termbox.Size()
@@ -368,6 +369,9 @@ func (b *Barnard) OnFocusPress(ui *uiterm.Ui, key uiterm.Key) {
 }
 
 func (b *Barnard) OnTextInput(ui *uiterm.Ui, textbox *uiterm.Textbox, text string) {
+	if b.handleAdminPrompt(text) {
+		return
+	}
 	if text == "" {
 		return
 	}
@@ -397,6 +401,8 @@ func (b *Barnard) OnTextInput(ui *uiterm.Ui, textbox *uiterm.Textbox, text strin
 			b.CommandNoiseSuppressionToggle(ui, cmdArgs)
 		case "record":
 			b.CommandRecord(ui, cmdArgs)
+		case "admin":
+			b.CommandAdmin(ui, cmdArgs)
 		case "micup":
 			b.CommandMicUp(ui, cmdArgs)
 		case "micdown":
@@ -473,6 +479,15 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
 	}
 	ui.Add(uiViewTree, &b.UiTree)
 
+	b.UiAdmin = uiterm.Tree{
+		Generator:         b.AdminItemBuild,
+		KeyListener:       b.AdminItemKeyPress,
+		CharacterListener: b.AdminItemCharacter,
+		Fg:                uiterm.ColorWhite,
+		Bg:                uiterm.ColorBlack,
+	}
+	ui.Add(uiViewAdmin, &b.UiAdmin)
+
 	b.Ui.AddCommandListener(b.CommandMicUp, "micup")
 	b.Ui.AddCommandListener(b.CommandMicDown, "micdown")
 	b.Ui.AddCommandListener(b.CommandTalk, "toggle")
@@ -483,7 +498,9 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
 	b.Ui.AddCommandListener(b.CommandPlayFile, "file")
 	b.Ui.AddCommandListener(b.CommandStopFile, "stop")
 	b.Ui.AddCommandListener(b.CommandRecord, "record")
+	b.Ui.AddCommandListener(b.CommandAdmin, "admin")
 	b.Ui.AddKeyListener(b.OnFocusPress, b.Hotkeys.SwitchViews)
+	b.Ui.AddKeyListener(b.OnAdminMenuPress, b.Hotkeys.AdminMenu)
 	b.Ui.AddKeyListener(b.OnVoiceToggle, b.Hotkeys.Talk)
 	b.Ui.AddKeyListener(b.OnTimestampToggle, b.Hotkeys.ToggleTimestamps)
 	b.Ui.AddKeyListener(b.OnNoiseSuppressionToggle, b.Hotkeys.NoiseSuppressionToggle)
@@ -494,6 +511,8 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
 	b.Ui.AddKeyListener(b.OnScrollOutputDown, b.Hotkeys.ScrollDown)
 	b.Ui.AddKeyListener(b.OnScrollOutputTop, b.Hotkeys.ScrollToTop)
 	b.Ui.AddKeyListener(b.OnScrollOutputBottom, b.Hotkeys.ScrollToBottom)
+	esc := uiterm.KeyEsc
+	b.Ui.AddKeyListener(b.OnAdminEscape, &esc)
 	b.Ui.SetActive(uiViewInput)
 	b.UiTree.Rebuild()
 	b.Ui.Refresh()
@@ -506,12 +525,20 @@ func (b *Barnard) OnUiResize(ui *uiterm.Ui, width, height int) {
 	if active == uiViewTree {
 		treeHeight = height - 4
 		outputHeight = 0
+	} else if active == uiViewAdmin {
+		treeHeight = 0
+		outputHeight = 0
 	} else {
 		treeHeight = 0
 		outputHeight = height - 4
 	}
 	ui.SetBounds(uiViewOutput, 0, 1, width, outputHeight+1)
 	ui.SetBounds(uiViewTree, 0, 1, width, treeHeight+1)
+	if active == uiViewAdmin {
+		ui.SetBounds(uiViewAdmin, 0, 1, width, height-3)
+	} else {
+		ui.SetBounds(uiViewAdmin, 0, 1, width, 1)
+	}
 	ui.SetBounds(uiViewStatus, 0, height-2, width, height-1)
 	ui.SetBounds(uiViewInputStatus, 0, height-1, len(b.GetInputStatus()), height)
 	ui.SetBounds(uiViewInput, len(b.GetInputStatus())+1, height-1, width, height)

@@ -37,9 +37,12 @@ type Barnard struct {
 	UiInput         uiterm.Textbox
 	UiStatus        uiterm.Label
 	UiTree          uiterm.Tree
+	UiAdmin         uiterm.Tree
 	UiInputStatus   uiterm.Label
 	SelectedChannel *gumble.Channel
 	selectedUser    *gumble.User
+	adminTargetUser *gumble.User
+	adminTargetChan *gumble.Channel
 	statusText      string
 	statusNotice    bool
 
@@ -66,6 +69,11 @@ type Barnard struct {
 	Recorder          *recording.Recorder
 	recordingStarting bool
 	recordingAllowed  *bool
+
+	pendingAdminPrompt *adminPrompt
+	adminBanList       gumble.BanList
+	adminUserList      gumble.RegisteredUsers
+	adminACL           *gumble.ACL
 }
 
 func (b *Barnard) StopTransmission() {

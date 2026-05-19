@@ -72,7 +72,7 @@ func (t *Tree) Rebuild() {
 		}
 	}
 	t.lines = lines
-	t.SetActiveLine(0, true)
+	t.SetActiveLine(0, false)
 	t.uiDraw()
 }
 
@@ -160,6 +160,13 @@ func (t *Tree) SetActiveLine(num int, relative bool) {
 	} else {
 		t.activeLine = bounded(num, 0, len(t.lines)-1)
 	}
+}
+
+func (t *Tree) ActiveItem() TreeItem {
+	if len(t.lines) == 0 {
+		return nil
+	}
+	return t.lines[bounded(t.activeLine, 0, len(t.lines)-1)].Item
 }
 
 func (t *Tree) uiKeyEvent(key Key) {

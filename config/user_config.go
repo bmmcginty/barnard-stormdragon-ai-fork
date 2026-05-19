@@ -83,6 +83,7 @@ func (c *Config) LoadConfig() {
 		SwitchViews:            key(uiterm.KeyTab),
 		ScrollUp:               key(uiterm.KeyPgup),
 		ScrollDown:             key(uiterm.KeyPgdn),
+		AdminMenu:              key(uiterm.KeyF11),
 		NoiseSuppressionToggle: key(uiterm.KeyF9),
 		CycleVoiceEffect:       key(uiterm.KeyF12),
 	}
@@ -169,6 +170,7 @@ func (c *Config) ensureHotkeys() {
 		SwitchViews:            key(uiterm.KeyTab),
 		ScrollUp:               key(uiterm.KeyPgup),
 		ScrollDown:             key(uiterm.KeyPgdn),
+		AdminMenu:              key(uiterm.KeyF11),
 		NoiseSuppressionToggle: key(uiterm.KeyF9),
 		CycleVoiceEffect:       key(uiterm.KeyF12),
 	}
@@ -205,6 +207,9 @@ func (c *Config) ensureHotkeys() {
 	}
 	if hotkeys.ScrollDown == nil {
 		hotkeys.ScrollDown = defaults.ScrollDown
+	}
+	if hotkeys.AdminMenu == nil {
+		hotkeys.AdminMenu = defaults.AdminMenu
 	}
 	if hotkeys.NoiseSuppressionToggle == nil {
 		hotkeys.NoiseSuppressionToggle = defaults.NoiseSuppressionToggle

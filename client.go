@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"git.stormux.org/storm/barnard/fileplayback"
@@ -215,14 +216,83 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
 	if e.Type.Has(gumble.UserChangeRecording) {
 		b.HandleRecordingChange(e)
 	}
+	if e.Type.Has(gumble.UserChangeComment) {
+		comment := strings.TrimSpace(esc(e.User.Comment))
+		if comment == "" {
+			comment = "empty"
+		}
+		b.AddOutputLine(fmt.Sprintf("User comment for %s: %s", e.User.Name, comment))
+	}
+	if e.Type.Has(gumble.UserChangeStats) && e.User.Stats != nil {
+		b.AddOutputLine(formatUserStats(e.User))
+	}
 	b.UiTree.Rebuild()
 	b.Ui.Refresh()
 }
 
 func (b *Barnard) OnChannelChange(e *gumble.ChannelChangeEvent) {
 	b.UpdateInputStatus(fmt.Sprintf("[%s]", e.Channel.Name))
+	if e.Type.Has(gumble.ChannelChangeDescription) {
+		description := strings.TrimSpace(esc(e.Channel.Description))
+		if description == "" {
+			description = "empty"
+		}
+		b.AddOutputLine(fmt.Sprintf("Channel description for %s: %s", e.Channel.Name, description))
+	}
+	if e.Type.Has(gumble.ChannelChangePermission) {
+		if permission := e.Channel.Permission(); permission != nil {
+			b.AddOutputLine(fmt.Sprintf("Channel permissions for %s: %s", e.Channel.Name, permissionList(*permission)))
+		}
+	}
 	b.UiTree.Rebuild()
 	b.Ui.Refresh()
+}
+
+func formatUserStats(user *gumble.User) string {
+	stats := user.Stats
+	connected := "unknown"
+	if !stats.Connected.IsZero() {
+		connected = time.Since(stats.Connected).Round(time.Second).String()
+	}
+	ip := "unknown"
+	if stats.IP != nil {
+		ip = stats.IP.String()
+	}
+	version := formatUserVersion(stats.Version)
+	return fmt.Sprintf(
+		"User stats for %s: version %s, connected %s, idle %s, bandwidth %d, UDP ping %.1f ms, TCP ping %.1f ms, IP %s, Opus %s",
+		user.Name,
+		version,
+		connected,
+		stats.Idle.Round(time.Second),
+		stats.Bandwidth,
+		stats.UDPPingAverage,
+		stats.TCPPingAverage,
+		ip,
+		onOff(stats.Opus),
+	)
+}
+
+func formatUserVersion(version gumble.Version) string {
+	major, minor, patch := (&version).SemanticVersion()
+	semantic := fmt.Sprintf("%d.%d.%d", major, minor, patch)
+	parts := []string{}
+	if version.Release != "" {
+		parts = append(parts, version.Release)
+	}
+	if version.OS != "" {
+		parts = append(parts, version.OS)
+	}
+	if version.OSVersion != "" {
+		parts = append(parts, version.OSVersion)
+	}
+	if len(parts) == 0 && version.Version == 0 {
+		return "unknown"
+	}
+	if len(parts) == 0 {
+		return semantic
+	}
+	return semantic + " " + strings.Join(parts, " ")
 }
 
 func (b *Barnard) OnPermissionDenied(e *gumble.PermissionDeniedEvent) {
@@ -253,18 +323,34 @@ func (b *Barnard) OnPermissionDenied(e *gumble.PermissionDeniedEvent) {
 }
 
 func (b *Barnard) OnUserList(e *gumble.UserListEvent) {
-	//for _,u := range e.UserList {
-	//b.UserConfig.UpdateUser(u)
-	//}
+	b.adminUserList = e.UserList
+	b.AddOutputLine(fmt.Sprintf("Admin: received %d registered users", len(e.UserList)))
+	b.UiAdmin.Rebuild()
+	b.Ui.Refresh()
 }
 
 func (b *Barnard) OnACL(e *gumble.ACLEvent) {
+	b.adminACL = e.ACL
+	if e.ACL != nil && e.ACL.Channel != nil {
+		b.AddOutputLine(fmt.Sprintf("Admin: received ACLs for %s", e.ACL.Channel.Name))
+	}
+	b.UiAdmin.Rebuild()
+	b.Ui.Refresh()
 }
 
 func (b *Barnard) OnBanList(e *gumble.BanListEvent) {
+	b.adminBanList = e.BanList
+	b.AddOutputLine(fmt.Sprintf("Admin: received %d bans", len(e.BanList)))
+	b.UiAdmin.Rebuild()
+	b.Ui.Refresh()
 }
 
 func (b *Barnard) OnContextActionChange(e *gumble.ContextActionChangeEvent) {
+	if e.ContextAction != nil {
+		b.AddOutputLine(fmt.Sprintf("Admin: context action updated: %s", e.ContextAction.Name))
+	}
+	b.UiAdmin.Rebuild()
+	b.Ui.Refresh()
 }
 
 func (b *Barnard) OnServerConfig(e *gumble.ServerConfigEvent) {
