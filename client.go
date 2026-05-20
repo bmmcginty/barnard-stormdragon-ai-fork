@@ -78,6 +78,7 @@ func (b *Barnard) OnConnect(e *gumble.ConnectEvent) {
 
 	// Reset muted channels state on connect
 	b.MutedChannels = make(map[uint32]bool)
+	b.userChannels = make(map[uint32]*gumble.Channel)
 	b.RecordingMutex.Lock()
 	b.recordingAllowed = nil
 	b.recordingStarting = false
@@ -89,6 +90,7 @@ func (b *Barnard) OnConnect(e *gumble.ConnectEvent) {
 
 	for _, u := range b.Client.Users {
 		b.UserConfig.UpdateUser(u)
+		b.rememberUserChannel(u)
 	}
 
 	b.UpdateInputStatus(fmt.Sprintf("[%s]", e.Client.Self.Channel.Name))
@@ -169,6 +171,7 @@ func (b *Barnard) OnTextMessage(e *gumble.TextMessageEvent) {
 }
 
 func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
+	notification, hasNotification := b.userChangeNotification(e)
 	if e.User != nil {
 		b.UserConfig.UpdateUser(e.User)
 
@@ -187,28 +190,14 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
 		}
 	}
 
-	var s = "unknown"
-	var t = "unknown"
-	if e.Type.Has(gumble.UserChangeConnected) {
-		s = "joined"
-		t = "join"
-		// Notify about users joining our channel
-		if e.User.Channel.Name == b.Client.Self.Channel.Name {
-			b.Notify(t, e.User.Name, e.User.Channel.Name)
-			b.AddOutputLine(fmt.Sprintf("%s %s %s", e.User.Name, s, e.User.Channel.Name))
-		}
-	}
 	if e.Type.Has(gumble.UserChangeDisconnected) {
-		s = "left"
-		t = "leave"
 		if e.User == b.selectedUser {
 			b.SetSelectedUser(nil)
 		}
-		// Always notify about disconnects if user has channel info and was in our channel
-		if e.User.Channel != nil && e.User.Channel.Name == b.Client.Self.Channel.Name {
-			b.Notify(t, e.User.Name, e.User.Channel.Name)
-			b.AddOutputLine(fmt.Sprintf("%s %s %s", e.User.Name, s, e.User.Channel.Name))
-		}
+	}
+	if hasNotification {
+		b.Notify(notification.event, notification.who, notification.what)
+		b.AddOutputLine(notification.line)
 	}
 	if e.Type.Has(gumble.UserChangeChannel) && e.User == b.Client.Self {
 		b.UpdateInputStatus(fmt.Sprintf("[%s]", e.User.Channel.Name))
@@ -226,8 +215,92 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
 	if e.Type.Has(gumble.UserChangeStats) && e.User.Stats != nil {
 		b.AddOutputLine(formatUserStats(e.User))
 	}
+	b.updateUserChannel(e)
 	b.UiTree.Rebuild()
 	b.Ui.Refresh()
+}
+
+type userChangeNotification struct {
+	event string
+	who   string
+	what  string
+	line  string
+}
+
+func (b *Barnard) userChangeNotification(e *gumble.UserChangeEvent) (userChangeNotification, bool) {
+	if e == nil || e.User == nil || b.Client == nil || b.Client.Self == nil || b.Client.Self.Channel == nil {
+		return userChangeNotification{}, false
+	}
+
+	currentChannel := b.Client.Self.Channel
+	previousChannel := b.previousUserChannel(e.User)
+	userChannel := e.User.Channel
+
+	if e.Type.Has(gumble.UserChangeConnected) {
+		return buildUserChangeNotification("join", "joined", e.User, userChannel, currentChannel)
+	}
+	if e.Type.Has(gumble.UserChangeDisconnected) {
+		if previousChannel == nil {
+			previousChannel = userChannel
+		}
+		return buildUserChangeNotification("leave", "left", e.User, previousChannel, currentChannel)
+	}
+	if e.Type.Has(gumble.UserChangeChannel) && e.User != b.Client.Self {
+		if sameChannel(userChannel, currentChannel) && !sameChannel(previousChannel, currentChannel) {
+			return buildUserChangeNotification("join", "joined", e.User, userChannel, currentChannel)
+		}
+		if sameChannel(previousChannel, currentChannel) && !sameChannel(userChannel, currentChannel) {
+			return buildUserChangeNotification("leave", "left", e.User, previousChannel, currentChannel)
+		}
+	}
+
+	return userChangeNotification{}, false
+}
+
+func buildUserChangeNotification(event string, verb string, user *gumble.User, eventChannel *gumble.Channel, currentChannel *gumble.Channel) (userChangeNotification, bool) {
+	if !sameChannel(eventChannel, currentChannel) {
+		return userChangeNotification{}, false
+	}
+	return userChangeNotification{
+		event: event,
+		who:   user.Name,
+		what:  eventChannel.Name,
+		line:  fmt.Sprintf("%s %s %s", user.Name, verb, eventChannel.Name),
+	}, true
+}
+
+func sameChannel(a *gumble.Channel, b *gumble.Channel) bool {
+	return a != nil && b != nil && a.ID == b.ID
+}
+
+func (b *Barnard) previousUserChannel(user *gumble.User) *gumble.Channel {
+	if b.userChannels == nil || user == nil {
+		return nil
+	}
+	return b.userChannels[user.Session]
+}
+
+func (b *Barnard) rememberUserChannel(user *gumble.User) {
+	if user == nil || user.Channel == nil {
+		return
+	}
+	if b.userChannels == nil {
+		b.userChannels = make(map[uint32]*gumble.Channel)
+	}
+	b.userChannels[user.Session] = user.Channel
+}
+
+func (b *Barnard) updateUserChannel(e *gumble.UserChangeEvent) {
+	if e == nil || e.User == nil {
+		return
+	}
+	if e.Type.Has(gumble.UserChangeDisconnected) {
+		if b.userChannels != nil {
+			delete(b.userChannels, e.User.Session)
+		}
+		return
+	}
+	b.rememberUserChannel(e.User)
 }
 
 func (b *Barnard) OnChannelChange(e *gumble.ChannelChangeEvent) {

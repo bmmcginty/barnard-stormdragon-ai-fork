@@ -53,6 +53,7 @@ type Barnard struct {
 
 	// Added for channel muting
 	MutedChannels map[uint32]bool
+	userChannels  map[uint32]*gumble.Channel
 
 	// Added for noise suppression
 	NoiseSuppressor *noise.Suppressor
