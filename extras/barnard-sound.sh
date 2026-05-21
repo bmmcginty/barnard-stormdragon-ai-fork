@@ -75,8 +75,8 @@ notify_fenrir() {
     if ! command -v socat > /dev/null 2>&1; then
         return 1
     fi
-    if [[ -e "/tmp/fenrirscreenreader-deamon.sock" ]]; then
-        socatFile="/tmp/fenrirscreenreader-deamon.sock"
+    if [[ -e "/tmp/fenrirscreenreader-daemon.sock" ]]; then
+        socatFile="/tmp/fenrirscreenreader-daemon.sock"
     else
         socatFile="$(find /tmp/ -maxdepth 1 -type s -name 'fenrirscreenreader-*.sock' | head -1)"
     fi
