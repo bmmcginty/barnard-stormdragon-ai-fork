@@ -18,21 +18,20 @@ type Config struct {
 }
 
 type exportableConfig struct {
-	Hotkeys                   *Hotkeys
-	AudioDriver               *string
-	MicVolume                 *float32
-	InputDevice               *string
-	OutputDevice              *string
-	Servers                   []*server
-	DefaultServer             *string
-	Username                  *string
-	NotifyCommand             *string
-	NoiseSuppressionEnabled   *bool
-	NoiseSuppressionThreshold *float32
-	VoiceEffect               *int
-	Certificate               *string
-	RecordingFormat           *string
-	RecordingDirectory        *string
+	Hotkeys                 *Hotkeys
+	AudioDriver             *string
+	MicVolume               *float32
+	InputDevice             *string
+	OutputDevice            *string
+	Servers                 []*server
+	DefaultServer           *string
+	Username                *string
+	NotifyCommand           *string
+	NoiseSuppressionEnabled *bool
+	VoiceEffect             *int
+	Certificate             *string
+	RecordingFormat         *string
+	RecordingDirectory      *string
 }
 
 type server struct {
@@ -131,10 +130,6 @@ func (c *Config) LoadConfig() {
 	if c.config.NoiseSuppressionEnabled == nil {
 		enabled := false
 		jc.NoiseSuppressionEnabled = &enabled
-	}
-	if c.config.NoiseSuppressionThreshold == nil {
-		threshold := float32(0.08)
-		jc.NoiseSuppressionThreshold = &threshold
 	}
 	if c.config.VoiceEffect == nil {
 		effect := 0 // Default to EffectNone
@@ -322,31 +317,6 @@ func (c *Config) GetNoiseSuppressionEnabled() bool {
 
 func (c *Config) SetNoiseSuppressionEnabled(enabled bool) {
 	c.config.NoiseSuppressionEnabled = &enabled
-	c.SaveConfig()
-}
-
-func (c *Config) GetNoiseSuppressionThreshold() float32 {
-	if c.config.NoiseSuppressionThreshold == nil {
-		return 0.08
-	}
-	threshold := *c.config.NoiseSuppressionThreshold
-	if threshold < 0.0 {
-		return 0.0
-	}
-	if threshold > 1.0 {
-		return 1.0
-	}
-	return threshold
-}
-
-func (c *Config) SetNoiseSuppressionThreshold(threshold float32) {
-	if threshold < 0.0 {
-		threshold = 0.0
-	}
-	if threshold > 1.0 {
-		threshold = 1.0
-	}
-	c.config.NoiseSuppressionThreshold = &threshold
 	c.SaveConfig()
 }
 

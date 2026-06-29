@@ -603,9 +603,6 @@ func (s *Stream) syncStereoProcessors() {
 		if leftSuppressor.IsEnabled() != rightSuppressor.IsEnabled() {
 			rightSuppressor.SetEnabled(leftSuppressor.IsEnabled())
 		}
-		if leftSuppressor.GetThreshold() != rightSuppressor.GetThreshold() {
-			rightSuppressor.SetThreshold(leftSuppressor.GetThreshold())
-		}
 	}
 
 	leftEffects, leftOk := s.effectsProcessor.(*audio.EffectsProcessor)
@@ -627,7 +624,6 @@ func cloneNoiseProcessor(np NoiseProcessor) NoiseProcessor {
 	if suppressor, ok := np.(*noise.Suppressor); ok {
 		clone := noise.NewSuppressor()
 		clone.SetEnabled(suppressor.IsEnabled())
-		clone.SetThreshold(suppressor.GetThreshold())
 		return clone
 	}
 	return nil

@@ -195,7 +195,6 @@ func main() {
 		b.UserConfig.SetNoiseSuppressionEnabled(true)
 	}
 	b.NoiseSuppressor.SetEnabled(enabled)
-	b.NoiseSuppressor.SetThreshold(b.UserConfig.GetNoiseSuppressionThreshold())
 
 	// Configure voice effects
 	b.VoiceEffects.SetEffect(audio.VoiceEffect(b.UserConfig.GetVoiceEffect()))

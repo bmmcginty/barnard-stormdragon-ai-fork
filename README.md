@@ -40,11 +40,10 @@ Voice effects are applied to your outgoing audio in real-time, after noise suppr
 
 ## Noise Suppression
 
-Barnard includes real-time noise suppression for microphone input to filter out background noise such as keyboard typing, computer fans, and other environmental sounds.
+Barnard includes RNNoise-based real-time noise suppression for microphone input to filter out background noise such as keyboard typing, computer fans, and other environmental sounds.
 
 ### Features
 - **Real-time processing**: Noise suppression is applied during audio capture with minimal latency
-- **Configurable amount**: Adjustable suppression amount via threshold value (default: `0.08`)
 - **Persistent settings**: Noise suppression preferences are saved in your configuration file
 - **Multiple control methods**: Toggle via hotkey, command line flag, or FIFO commands
 
@@ -52,16 +51,14 @@ Barnard includes real-time noise suppression for microphone input to filter out 
 - **F9 key**: Toggle noise suppression on/off (configurable hotkey)
 - **Command line**: Use `--noise-suppression` flag to enable at startup
 - **FIFO command**: Send `noise` command to toggle during runtime
-- **Configuration**: Set `noisesuppressionenabled` and `noisesuppressionthreshold` in `~/.barnard.toml`
+- **Configuration**: Set `noisesuppressionenabled` in `~/.barnard.toml`
 
 ### Configuration Example
 ```toml
 noisesuppressionenabled = true
-noisesuppressionthreshold = 0.08
 ```
 
-`noisesuppressionthreshold` accepts values from `0.0` to `1.0`, where higher values apply stronger suppression.
-The noise suppression algorithm uses adaptive noise-floor tracking, transient suppression, and smoothed gain reduction to reduce background noise while preserving voice quality.
+RNNoise is a required build and runtime dependency.
 
 ## FIFO Control
 
