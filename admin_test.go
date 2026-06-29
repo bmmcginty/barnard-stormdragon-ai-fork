@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"git.stormux.org/storm/barnard/gumble/gumble"
+	"git.stormux.org/storm/barnard/uiterm"
 )
 
 func TestParseToggleState(t *testing.T) {
@@ -61,5 +62,29 @@ func TestPermissionList(t *testing.T) {
 	got := permissionList(gumble.PermissionWrite | gumble.PermissionBan)
 	if got != "write,ban" {
 		t.Fatalf("expected write,ban, got %q", got)
+	}
+}
+
+func TestAdminEscapeInputs(t *testing.T) {
+	if !isAdminEscapeKey(uiterm.KeyEsc) {
+		t.Fatal("expected escape key to close admin menu")
+	}
+	if !isAdminEscapeKey(uiterm.KeyAltEsc) {
+		t.Fatal("expected alt escape key to close admin menu")
+	}
+	if !isAdminEscapeKey(uiterm.KeyAltArrowUp) {
+		t.Fatal("expected escape-prefixed up arrow to close admin menu")
+	}
+	if !isAdminEscapeKey(uiterm.KeyAltArrowDown) {
+		t.Fatal("expected escape-prefixed down arrow to close admin menu")
+	}
+	if isAdminEscapeKey(uiterm.KeyEnter) {
+		t.Fatal("expected enter key not to close admin menu")
+	}
+	if !isAdminEscapeCharacter(rune(uiterm.KeyEsc)) {
+		t.Fatal("expected escape character to close admin menu")
+	}
+	if isAdminEscapeCharacter('x') {
+		t.Fatal("expected non-escape character not to close admin menu")
 	}
 }

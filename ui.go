@@ -66,7 +66,7 @@ func (b *Barnard) UpdateInputStatus(status string) {
 		status = status[:17] + "..." + "]"
 	}
 	b.UiInputStatus.Text = status
-	b.UiTree.Rebuild()
+	b.RebuildUserChannelTreePreservingSelection()
 	b.Ui.Refresh()
 }
 

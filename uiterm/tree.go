@@ -59,11 +59,34 @@ func (t *Tree) uiSetBounds(x0, y0, x1, y1 int) {
 }
 
 func (t *Tree) Rebuild() {
+	t.rebuild(false, nil)
+}
+
+func (t *Tree) RebuildPreservingActiveItem(sameItem func(previous, current TreeItem) bool) {
+	t.rebuild(true, sameItem)
+}
+
+func (t *Tree) SetActiveItem(target TreeItem, sameItem func(previous, current TreeItem) bool) bool {
+	if target == nil || sameItem == nil {
+		return false
+	}
+	for line, item := range t.lines {
+		if sameItem(target, item.Item) {
+			t.SetActiveLine(line, false)
+			return true
+		}
+	}
+	return false
+}
+
+func (t *Tree) rebuild(preserveActive bool, sameItem func(previous, current TreeItem) bool) {
 	if t.Generator == nil {
 		t.lines = []renderedTreeItem{}
 		return
 	}
 
+	previousItem := t.ActiveItem()
+	previousLine := t.activeLine
 	lines := []renderedTreeItem{}
 	for _, item := range t.Generator(nil) {
 		children := t.rebuild_rec(item, 0)
@@ -72,8 +95,22 @@ func (t *Tree) Rebuild() {
 		}
 	}
 	t.lines = lines
-	t.SetActiveLine(0, false)
-	t.uiDraw()
+	if preserveActive {
+		t.SetActiveLine(previousLine, false)
+		if previousItem != nil && sameItem != nil {
+			for line, item := range t.lines {
+				if sameItem(previousItem, item.Item) {
+					t.SetActiveLine(line, false)
+					break
+				}
+			}
+		}
+	} else {
+		t.SetActiveLine(0, false)
+	}
+	if t.ui != nil {
+		t.uiDraw()
+	}
 }
 
 func (t *Tree) rebuild_rec(parent TreeItem, level int) []renderedTreeItem {
@@ -138,11 +175,10 @@ func (t *Tree) uiDraw() {
 			fg := t.Fg
 			bg := t.Bg
 			dx := x - t.x0
-			dy := y - t.y0
 			if reader != nil && level*2 <= dx {
 				if ch, _, err := reader.ReadRune(); err == nil {
 					chr = ch
-					fg, bg = item.TreeItemStyle(fg, bg, t.active && t.activeLine == dy)
+					fg, bg = item.TreeItemStyle(fg, bg, t.active && t.activeLine == line)
 				}
 			}
 			termbox.SetCell(x, y, chr, termbox.Attribute(fg), termbox.Attribute(bg))

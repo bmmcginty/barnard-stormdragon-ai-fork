@@ -216,7 +216,7 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
 		b.AddOutputLine(formatUserStats(e.User))
 	}
 	b.updateUserChannel(e)
-	b.UiTree.Rebuild()
+	b.RebuildUserChannelTreePreservingSelection()
 	b.Ui.Refresh()
 }
 
@@ -317,7 +317,7 @@ func (b *Barnard) OnChannelChange(e *gumble.ChannelChangeEvent) {
 			b.AddOutputLine(fmt.Sprintf("Channel permissions for %s: %s", e.Channel.Name, permissionList(*permission)))
 		}
 	}
-	b.UiTree.Rebuild()
+	b.RebuildUserChannelTreePreservingSelection()
 	b.Ui.Refresh()
 }
 

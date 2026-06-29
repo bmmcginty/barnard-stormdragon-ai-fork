@@ -50,12 +50,13 @@ func (b *Barnard) OnAdminEscape(ui *uiterm.Ui, key uiterm.Key) {
 		return
 	}
 	if b.Ui.Active() == uiViewAdmin {
-		b.Ui.SetActive(uiViewTree)
-		width, height := termboxSize()
-		b.OnUiResize(ui, width, height)
+		b.CloseAdminMenu(ui)
 		b.AddOutputLine("Admin: closed")
-		ui.Refresh()
 	}
+}
+
+func (b *Barnard) closeAdminAction() {
+	b.OnAdminEscape(b.Ui, uiterm.KeyEsc)
 }
 
 func (b *Barnard) OpenAdminMenu() {
@@ -63,6 +64,7 @@ func (b *Barnard) OpenAdminMenu() {
 		b.AddOutputLine("Admin: not connected")
 		return
 	}
+	b.adminReturnItem = b.UiTree.ActiveItem()
 	b.adminTargetUser = b.selectedUser
 	b.adminTargetChan = b.Client.Self.Channel
 	if b.Ui.Active() == uiViewTree {
@@ -96,6 +98,15 @@ func (b *Barnard) OpenAdminMenu() {
 		b.AddOutputLine("Admin: opened")
 	}
 	b.Ui.Refresh()
+}
+
+func (b *Barnard) CloseAdminMenu(ui *uiterm.Ui) {
+	b.Ui.SetActive(uiViewTree)
+	b.UiTree.SetActiveItem(b.adminReturnItem, sameUserChannelTreeItem)
+	b.adminReturnItem = nil
+	width, height := termboxSize()
+	b.OnUiResize(ui, width, height)
+	ui.Refresh()
 }
 
 func termboxSize() (int, int) {
@@ -140,11 +151,15 @@ func (b *Barnard) AdminItemBuild(item uiterm.TreeItem) []uiterm.TreeItem {
 	if children := b.adminContextActionItems(); len(children) > 0 {
 		items = append(items, adminItem{label: "Context actions", children: children})
 	}
-	items = append(items, adminItem{label: "Close actions menu", action: func() { b.OnAdminEscape(b.Ui, uiterm.KeyEsc) }})
+	items = append(items, adminItem{label: "Close actions menu", action: b.closeAdminAction})
 	return items
 }
 
 func (b *Barnard) AdminItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm.TreeItem, key uiterm.Key) {
+	if isAdminEscapeKey(key) {
+		b.OnAdminEscape(ui, key)
+		return
+	}
 	if key != uiterm.KeyEnter {
 		return
 	}
@@ -158,6 +173,22 @@ func (b *Barnard) AdminItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiter
 }
 
 func (b *Barnard) AdminItemCharacter(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm.TreeItem, ch rune) {
+	if isAdminEscapeCharacter(ch) {
+		b.OnAdminEscape(ui, uiterm.KeyEsc)
+	}
+}
+
+func isAdminEscapeKey(key uiterm.Key) bool {
+	switch key {
+	case uiterm.KeyEsc, uiterm.KeyAltEsc, uiterm.KeyAltArrowUp, uiterm.KeyAltArrowDown:
+		return true
+	default:
+		return false
+	}
+}
+
+func isAdminEscapeCharacter(ch rune) bool {
+	return ch == rune(uiterm.KeyEsc)
 }
 
 func (b *Barnard) informationItems() []uiterm.TreeItem {

@@ -43,6 +43,7 @@ type Barnard struct {
 	selectedUser    *gumble.User
 	adminTargetUser *gumble.User
 	adminTargetChan *gumble.Channel
+	adminReturnItem uiterm.TreeItem
 	statusText      string
 	statusNotice    bool
 
@@ -144,7 +145,7 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
 				delete(b.MutedChannels, treeItem.Channel.ID)
 			}
 
-			b.UiTree.Rebuild()
+			b.RebuildUserChannelTreePreservingSelection()
 			b.Ui.Refresh()
 		}
 		if key == *b.Hotkeys.VolumeDown {
@@ -169,7 +170,7 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
 					treeItem.User.AudioSource.SetGain(treeItem.User.Volume)
 				}
 			}
-			b.UiTree.Rebuild()
+			b.RebuildUserChannelTreePreservingSelection()
 			b.Ui.Refresh()
 		}
 		if key == *b.Hotkeys.VolumeDown {
