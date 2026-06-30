@@ -7,7 +7,6 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"io/ioutil"
 	"os"
-	"os/user"
 	"strconv"
 	"strings"
 )
@@ -398,15 +397,14 @@ func fileExists(path string) bool {
 
 func resolvePath(path string) string {
 	if strings.HasPrefix(path, "~/") || strings.Contains(path, "$HOME") {
-		usr, err := user.Current()
+		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			panic(err)
 		}
-		var hd = usr.HomeDir
 		if strings.Contains(path, "$HOME") {
-			path = strings.Replace(path, "$HOME", hd, 1)
+			path = strings.Replace(path, "$HOME", homeDir, 1)
 		} else {
-			path = strings.Replace(path, "~", hd, 1)
+			path = strings.Replace(path, "~", homeDir, 1)
 		}
 	}
 	return path

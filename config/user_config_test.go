@@ -36,3 +36,16 @@ func TestConfigBackfillsRecordingDefaults(t *testing.T) {
 		t.Fatalf("expected admin menu f11, got %s", got)
 	}
 }
+
+func TestConfigUsesHomeEnvironmentForDefaultPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	configPath := "~/.barnard.toml"
+
+	cfg := NewConfig(&configPath)
+	cfg.SaveConfig()
+
+	if _, err := os.Stat(filepath.Join(dir, ".barnard.toml")); err != nil {
+		t.Fatalf("expected config to be written under HOME: %v", err)
+	}
+}
