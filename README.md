@@ -118,6 +118,10 @@ An Ncurses interface has been created by members of the [F123 Group](https://git
 Make sure the folder in which you store the barnard binary is in your path. This should be the default for any f123 user.
 Then just run ./barnard-ui from this folder, and follow the instructions.
 You can add barnard-ui to your path as well, and access it from anywhere.
+New installs start with an empty server list. Saved servers are stored in
+`~/.config/barnard/servers.conf` as INI-style `[server]` entries. If you save a
+server password, it is written to that file so Barnard can use it when
+connecting; the UI writes the file with mode `0600`.
 
 ## Modifications
 

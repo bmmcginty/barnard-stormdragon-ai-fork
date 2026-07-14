@@ -22,28 +22,69 @@
 # 02110-1301, USA.
 #
 #--code--
- 
+
 # the gettext essentials
 export TEXTDOMAIN=barnard-ui
 export TEXTDOMAINDIR=/usr/share/locale
-source gettext.sh
+# shellcheck disable=SC1091
+if ! source gettext.sh 2> /dev/null; then
+    gettext() {
+        printf '%s\n' "$1"
+    }
+fi
+
+cacheDir="${XDG_CACHE_HOME:-$HOME/.cache}"
+configDir="$HOME/.config/barnard"
+serverFile="$configDir/servers.conf"
+certFile="$configDir/barnard.pem"
+logFile="$cacheDir/${0##*/}.log"
+
+if ! mkdir -p "$cacheDir" "$configDir"; then
+    printf 'Could not create Barnard configuration directories.\n' >&2
+    exit 1
+fi
+if ! : > "$logFile"; then
+    printf 'Could not write log file: %s\n' "$logFile" >&2
+    exit 1
+fi
+
+# Settings to improve accessibility of dialog.
+export DIALOGOPTS='--insecure --no-lines --visit-items'
+
+declare -Ag mumbleServerList=()
+declare -Ag serverAddresses=()
+declare -Ag serverPorts=()
+declare -Ag serverPasswords=()
+declare -Ag serverInsecure=()
 
 # Log writing function
 log() {
     # Usage: command | log for just stdout.
-	# Or command |& log for stderr and stdout.
-    while read -r line ; do
-        echo "$line" | tee -a "$logFile" &> /dev/null
+    # Or command |& log for stderr and stdout.
+    local line
+    while IFS= read -r line ; do
+        printf '%s\n' "$line" >> "$logFile"
     done
 }
- 
-# Log file name is ~/.cache/scriptname.log
-logFile="$HOME/.cache/${0##*/}.log"
-# Clear previous logs
-echo -n | tee "$logFile" &> /dev/null
 
-# Settings to improve accessibility of dialog.
-export DIALOGOPTS='--insecure --no-lines --visit-items'
+fatal() {
+    local message="$*"
+    printf '%s\n' "$message" | log
+    if command -v dialog > /dev/null 2>&1; then
+        dialog --clear --msgbox "$message" 10 72
+    else
+        printf '%s\n' "$message" >&2
+    fi
+    exit 1
+}
+
+require_command() {
+    local commandName="$1"
+    local displayName="${2:-$1}"
+    if ! command -v "$commandName" > /dev/null 2>&1; then
+        fatal "$(gettext "Required command not found:") $displayName"
+    fi
+}
 
 inputbox() {
     # Returns: text entered by the user
@@ -62,9 +103,9 @@ passwordbox() {
 }
 
 msgbox() {
-# Returns: None
-# Shows the provided message on the screen with an ok button.
-dialog --clear --msgbox "$*" 10 72
+    # Returns: None
+    # Shows the provided message on the screen with an ok button.
+    dialog --clear --msgbox "$*" 10 72
 }
 
 yesno() {
@@ -72,8 +113,7 @@ yesno() {
     # Args: Question to user.
     # Called  in if $(yesno) == "Yes"
     # Or variable=$(yesno)
-    dialog --clear --backtitle "$(gettext "Press 'Enter' for \"yes\" or 'Escape' for \"no\".")" --yesno "$*" 10 80 --stdout
-    if [[ $? -eq 0 ]]; then
+    if dialog --clear --backtitle "$(gettext "Press 'Enter' for \"yes\" or 'Escape' for \"no\".")" --yesno "$*" 10 80 --stdout; then
         echo "Yes"
     else
         echo "No"
@@ -84,7 +124,7 @@ menulist() {
     # Args: menu options.
     # returns: selected tag
     local i
-    local menuList
+    local -a menuList=()
     for i in "$@" ; do
         menuList+=("$i" "$i")
     done
@@ -94,93 +134,371 @@ menulist() {
         --menu "$(gettext "Please select one")" 0 0 0 "${menuList[@]}" --stdout
 }
 
-[[ -d ~/.config/barnard ]] || mkdir ~/.config/barnard
-if [[ ! -r ~/.config/barnard/servers.conf ]]; then
-    echo "Adding default mumble server." | log
-    echo "declare -Ag mumbleServerList=(" >  ~/.config/barnard/servers.conf
-    echo "[Slint]=\"slint.fr:64738 -insecure\"" >> ~/.config/barnard/servers.conf
-    echo ")" >> ~/.config/barnard/servers.conf
-fi
-source ~/.config/barnard/servers.conf
+trim() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
+}
 
-function add-server() {
-    local serverName="$(inputbox "$(gettext "Enter a name for the new server:")")"
-    [[ $? -ne 0 ]] && return
-    local serverAddress="$(inputbox "$(gettext "Enter the address of the server. If there is a password, do it in the form, password@address, if the port is not standard, add it after a :, address:port:")")"
-    [[ $? -ne 0 ]] && return
-    local serverPassword="${serverAddress%@*}"
-    local serverAddress="${serverAddress#*@}"
-    local serverPort="${serverAddress##*:}"
-    local serverAddress="${serverAddress%:*}"
-    if ! [[ "$serverPort" =~ ^[0-9]+ ]]; then
-        serverPort=64738
+field_is_valid() {
+    local value="$1"
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]]
+}
+
+port_is_valid() {
+    local port="$1"
+    [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 ))
+}
+
+parse_host_port() {
+    local hostPort
+    hostPort="$(trim "$1")"
+    parsedAddress=""
+    parsedPort="64738"
+
+    if [[ -z "$hostPort" ]]; then
+        return 1
     fi
-    mumbleServerList[$serverName]="${serverAddress}:${serverPort}${serverPassword:+ -password ${serverPassword}}"
-    echo "declare -Ag mumbleServerList=(" > ~/.config/barnard/servers.conf
-    for i in "${!mumbleServerList[@]}" ; do
-        echo "[${i}]=\"${mumbleServerList[$i]}\"" >> ~/.config/barnard/servers.conf
-    done
-    echo ")" >> ~/.config/barnard/servers.conf
-    echo "Added server $serverName ${serverAddress}:${serverPort}" | log
+
+    if [[ "$hostPort" =~ ^\[([^]]+)\](:([0-9]+))?$ ]]; then
+        parsedAddress="${BASH_REMATCH[1]}"
+        parsedPort="${BASH_REMATCH[3]:-64738}"
+    elif [[ "$hostPort" =~ ^(.+):([0-9]+)$ ]]; then
+        parsedAddress="${BASH_REMATCH[1]}"
+        parsedPort="${BASH_REMATCH[2]}"
+    elif [[ "$hostPort" =~ ^(.+):([^:]+)$ ]]; then
+        return 1
+    else
+        parsedAddress="$hostPort"
+    fi
+
+    parsedAddress="$(trim "$parsedAddress")"
+    if [[ -z "$parsedAddress" ]] || ! port_is_valid "$parsedPort"; then
+        return 1
+    fi
+    field_is_valid "$parsedAddress"
+}
+
+parse_server_input() {
+    local raw="$1"
+    local hostPort
+    raw="$(trim "$raw")"
+    parsedPassword=""
+
+    if [[ -z "$raw" ]]; then
+        return 1
+    fi
+
+    if [[ "$raw" == *@* ]]; then
+        parsedPassword="${raw%%@*}"
+        hostPort="${raw#*@}"
+    else
+        hostPort="$raw"
+    fi
+
+    field_is_valid "$parsedPassword" && parse_host_port "$hostPort"
+}
+
+add_server_record() {
+    local serverName
+    local serverAddress="$2"
+    local serverPort="$3"
+    local serverPassword="$4"
+    local insecure="${5:-0}"
+    serverName="$(trim "$1")"
+
+    if [[ -z "$serverName" ]]; then
+        return 1
+    fi
+    if ! field_is_valid "$serverName" || ! field_is_valid "$serverAddress" || ! field_is_valid "$serverPassword"; then
+        return 1
+    fi
+    if ! port_is_valid "$serverPort"; then
+        return 1
+    fi
+    insecure="${insecure,,}"
+    if [[ "$insecure" == "true" || "$insecure" == "yes" || "$insecure" == "on" ]]; then
+        insecure="1"
+    fi
+    if [[ "$insecure" != "1" ]]; then
+        insecure="0"
+    fi
+
+    serverAddresses["$serverName"]="$serverAddress"
+    serverPorts["$serverName"]="$serverPort"
+    serverPasswords["$serverName"]="$serverPassword"
+    serverInsecure["$serverName"]="$insecure"
+    mumbleServerList["$serverName"]="$serverAddress:$serverPort"
+}
+
+server_names() {
+    printf '%s\n' "${!mumbleServerList[@]}" | LC_ALL=C sort
+}
+
+server_list_is_empty() {
+    (( ${#mumbleServerList[@]} == 0 ))
+}
+
+save_servers() {
+    local tmpFile="$serverFile.tmp"
+    local name
+    local insecure
+
+    if ! {
+        printf '# barnard-ui server list\n'
+        printf '# Passwords are stored only when provided; this file is written with mode 0600.\n\n'
+        while IFS= read -r name; do
+            [[ -z "$name" ]] && continue
+            if [[ "${serverInsecure[$name]}" == "1" ]]; then
+                insecure="true"
+            else
+                insecure="false"
+            fi
+            printf '[server]\n'
+            printf 'name = %s\n' "$name"
+            printf 'address = %s\n' "${serverAddresses[$name]}"
+            printf 'port = %s\n' "${serverPorts[$name]}"
+            printf 'password = %s\n' "${serverPasswords[$name]}"
+            printf 'insecure = %s\n\n' "$insecure"
+        done < <(server_names)
+    } > "$tmpFile"; then
+        rm -f "$tmpFile"
+        msgbox "$(gettext "Could not save server list.")"
+        return 1
+    fi
+
+    chmod 600 "$tmpFile" 2> /dev/null || true
+    if ! mv "$tmpFile" "$serverFile"; then
+        rm -f "$tmpFile"
+        msgbox "$(gettext "Could not save server list.")"
+        return 1
+    fi
+}
+
+load_servers() {
+    local line
+    local name
+    local address
+    local port
+    local password
+    local insecure
+    local key
+    local value
+    local inServerSection=0
+    local needsRewrite=0
+
+    [[ -r "$serverFile" ]] || return 0
+
+    flush_server_section() {
+        if (( inServerSection )); then
+            if [[ -n "$name" || -n "$address" || -n "$password" ]]; then
+                if ! add_server_record "$name" "$address" "$port" "$password" "$insecure"; then
+                    printf 'Ignored invalid server entry from %s\n' "$serverFile" | log
+                    needsRewrite=1
+                fi
+            fi
+        fi
+        name=""
+        address=""
+        port="64738"
+        password=""
+        insecure="0"
+        inServerSection=0
+    }
+
+    flush_server_section
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="$(trim "$line")"
+        [[ -z "$line" || "$line" == \#* ]] && continue
+
+        if [[ "$line" =~ ^\[([^]]+)\]$ ]]; then
+            flush_server_section
+            if [[ "${BASH_REMATCH[1],,}" == "server" ]]; then
+                inServerSection=1
+            else
+                needsRewrite=1
+            fi
+            continue
+        fi
+
+        if (( ! inServerSection )); then
+            needsRewrite=1
+            continue
+        fi
+
+        if [[ "$line" == *=* ]]; then
+            key="${line%%=*}"
+            value="${line#*=}"
+            key="$(trim "$key")"
+            key="${key,,}"
+            value="$(trim "$value")"
+            case "$key" in
+                name) name="$value" ;;
+                address|host) address="$value" ;;
+                port) port="$value" ;;
+                password) password="$value" ;;
+                insecure) insecure="$value" ;;
+                *) needsRewrite=1 ;;
+            esac
+        else
+            needsRewrite=1
+        fi
+    done < "$serverFile"
+    flush_server_section
+
+    if (( needsRewrite )); then
+        save_servers
+    fi
+}
+
+config_has_nonempty_value() {
+    local key="$1"
+    local configFile="${2:-$HOME/.barnard.toml}"
+    local line
+    local currentKey
+    local value
+    key="${key,,}"
+
+    [[ -r "$configFile" ]] || return 1
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="$(trim "$line")"
+        [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+        currentKey="${line%%=*}"
+        currentKey="$(trim "$currentKey")"
+        currentKey="${currentKey,,}"
+        [[ "$currentKey" == "$key" ]] || continue
+        value="${line#*=}"
+        value="$(trim "$value")"
+        [[ -z "$value" || "$value" == '""' || "$value" == "''" ]] && return 1
+        return 0
+    done < "$configFile"
+    return 1
+}
+
+add-server() {
+    local serverName
+    local serverAddress
+    local serverPassword
+    local insecure="0"
+
+    serverName="$(inputbox "$(gettext "Enter a name for the new server:")")" || return
+    serverName="$(trim "$serverName")"
+    if [[ -z "$serverName" ]]; then
+        msgbox "$(gettext "Server name cannot be empty.")"
+        return
+    fi
+    if ! field_is_valid "$serverName"; then
+        msgbox "$(gettext "Server name cannot contain line breaks.")"
+        return
+    fi
+
+    serverAddress="$(inputbox "$(gettext "Enter the address of the server. If the port is not standard, add it after a colon, like address:port.")")" || return
+    if ! parse_server_input "$serverAddress"; then
+        msgbox "$(gettext "Invalid server address or port.")"
+        return
+    fi
+
+    serverPassword="$(passwordbox "$(gettext "Enter the server password, or leave it blank if there is no password:")")" || return
+    if [[ -n "$serverPassword" ]]; then
+        if ! field_is_valid "$serverPassword"; then
+            msgbox "$(gettext "Server password cannot contain line breaks.")"
+            return
+        fi
+        parsedPassword="$serverPassword"
+    fi
+
+    if [[ "$(yesno "$(gettext "Skip server certificate verification for this server?")")" == "Yes" ]]; then
+        insecure="1"
+    fi
+
+    if ! add_server_record "$serverName" "$parsedAddress" "$parsedPort" "$parsedPassword" "$insecure"; then
+        msgbox "$(gettext "Could not add server. Check the server name, address, and password.")"
+        return
+    fi
+    save_servers || return
+    printf 'Added server %s %s:%s\n' "$serverName" "$parsedAddress" "$parsedPort" | log
     msgbox "$(gettext "Added server") $serverName"
 }
 
 connect() {
-    ifs="$IFS"
-    IFS=$'\n'
     local serverName
-    serverName="$(menulist "${!mumbleServerList[@]}" "Go Back")"
-    [[ $? -eq 1 ]] && exit 0
-    IFS="$ifs"
-    if [[ -z "$serverName" || "$serverName" == "Go Back" ]]; then
+    local barnardStatus
+    local -a names=()
+    local -a barnardArgs=()
+
+    if server_list_is_empty; then
+        msgbox "$(gettext "No saved servers. Add a server first.")"
         return
     fi
-    local username
-    username="$(grep -m 1 '^Username = ' ~/.barnard.toml 2> /dev/null | cut -d '=' -f2- | sed "s/^[[:space:]]*//;s/[[:space:]]*$//;s/'//g")"
-    username="${username//[[:space:]]/_}"
-    username="${username:-${USER}-${HOSTNAME}}"
-    local certArgs=()
-    if [[ -f "$certFile" ]]; then
-        certArgs=(-certificate "$certFile")
+
+    mapfile -t names < <(server_names)
+    serverName="$(menulist "${names[@]}" "$(gettext "Go Back")")" || return
+    if [[ -z "$serverName" || "$serverName" == "$(gettext "Go Back")" ]]; then
+        return
     fi
-    # shellcheck disable=SC2086
-    command barnard -username "$username" -server ${mumbleServerList[$serverName]} "${certArgs[@]}" --fifo ~/.config/barnard/cmd --buffers 16 |& log
+
+    require_command barnard barnard
+
+    barnardArgs=(-server "${serverAddresses[$serverName]}:${serverPorts[$serverName]}")
+    if [[ -n "${serverPasswords[$serverName]}" ]]; then
+        barnardArgs+=(-password "${serverPasswords[$serverName]}")
+    fi
+    if [[ "${serverInsecure[$serverName]}" == "1" ]]; then
+        barnardArgs+=(-insecure)
+    fi
+    if ! config_has_nonempty_value username; then
+        barnardArgs+=(-username "${USER}-${HOSTNAME}")
+    fi
+    if [[ -f "$certFile" ]] && ! config_has_nonempty_value certificate; then
+        barnardArgs+=(-certificate "$certFile")
+    fi
+
+    command barnard "${barnardArgs[@]}" --fifo "$configDir/cmd" --buffers 16 |& log
+    barnardStatus=${PIPESTATUS[0]}
+    if (( barnardStatus != 0 )); then
+        msgbox "$(gettext "Barnard exited with status") $barnardStatus. $(gettext "See log:") $logFile"
+    fi
 }
 
 remove-server() {
-    ifs="$IFS"
-    IFS=$'\n'
-    local serverName="$(menulist "${!mumbleServerList[@]}" "Go Back")"
-    IFS="$ifs"
-    if [[ -z "$serverName" || "$serverName" == "Go Back" ]]; then
+    local serverName
+    local -a names=()
+
+    if server_list_is_empty; then
+        msgbox "$(gettext "No saved servers to remove.")"
         return
     fi
-    unset "mumbleServerList[$serverName]"
-    echo "declare -Ag mumbleServerList=(" > ~/.config/barnard/servers.conf
-    for i in "${!mumbleServerList[@]}" ; do
-        echo "[${i}]=\"${mumbleServerList[$i]}\"" >> ~/.config/barnard/servers.conf
-    done
-    echo ")" >> ~/.config/barnard/servers.conf
-    echo "Removed server $serverName ${serverAddress}:${serverPort}" | log
-    msgbox "$(gettext "Removed server") $serverName"
-  }  
 
-# Certificate configuration
-certDir="$HOME/.config/barnard"
-certFile="$certDir/barnard.pem"
+    mapfile -t names < <(server_names)
+    serverName="$(menulist "${names[@]}" "$(gettext "Go Back")")" || return
+    if [[ -z "$serverName" || "$serverName" == "$(gettext "Go Back")" ]]; then
+        return
+    fi
+
+    unset "mumbleServerList[$serverName]"
+    unset "serverAddresses[$serverName]"
+    unset "serverPorts[$serverName]"
+    unset "serverPasswords[$serverName]"
+    unset "serverInsecure[$serverName]"
+    save_servers || return
+    printf 'Removed server %s\n' "$serverName" | log
+    msgbox "$(gettext "Removed server") $serverName"
+}
 
 generate-certificate() {
+    local commonName
+    require_command openssl openssl
+
     if [[ -f "$certFile" ]]; then
         if [[ "$(yesno "$(gettext "A certificate already exists. Do you want to replace it? This may affect your registered identity on servers.")")" != "Yes" ]]; then
             return
         fi
     fi
-    local commonName
-    commonName="$(inputbox "$(gettext "Enter a name for your certificate (e.g., your username):")" "barnard")"
-    [[ $? -ne 0 ]] && return
+    commonName="$(inputbox "$(gettext "Enter a name for your certificate (e.g., your username):")" "barnard")" || return
     [[ -z "$commonName" ]] && commonName="barnard"
 
-    if openssl req -x509 -newkey rsa:2048 -keyout "$certFile" -out "$certFile" -days 3650 -nodes -subj "/CN=$commonName" 2>/dev/null; then
+    if openssl req -x509 -newkey rsa:2048 -keyout "$certFile" -out "$certFile" -days 3650 -nodes -subj "/CN=$commonName" 2> /dev/null; then
         chmod 600 "$certFile"
         msgbox "$(gettext "Certificate generated successfully.")"
     else
@@ -189,12 +507,14 @@ generate-certificate() {
 }
 
 view-certificate() {
+    local certInfo
+    require_command openssl openssl
+
     if [[ ! -f "$certFile" ]]; then
         msgbox "$(gettext "No certificate found.") $certFile"
         return
     fi
-    local certInfo
-    certInfo=$(openssl x509 -in "$certFile" -noout -subject -dates -fingerprint 2>/dev/null)
+    certInfo=$(openssl x509 -in "$certFile" -noout -subject -dates -fingerprint 2> /dev/null)
     if [[ -n "$certInfo" ]]; then
         msgbox "$certInfo"
     else
@@ -204,8 +524,9 @@ view-certificate() {
 
 import-certificate() {
     local importPath
-    importPath="$(inputbox "$(gettext "Enter the full path to your certificate file (PEM format with certificate and private key):")")"
-    [[ $? -ne 0 ]] && return
+    require_command openssl openssl
+
+    importPath="$(inputbox "$(gettext "Enter the full path to your certificate file (PEM format with certificate and private key):")")" || return
     [[ -z "$importPath" ]] && return
 
     # Expand ~ if present
@@ -217,13 +538,13 @@ import-certificate() {
     fi
 
     # Verify it's a valid certificate
-    if ! openssl x509 -in "$importPath" -noout 2>/dev/null; then
+    if ! openssl x509 -in "$importPath" -noout 2> /dev/null; then
         msgbox "$(gettext "The file does not appear to be a valid PEM certificate.")"
         return
     fi
 
     # Verify it contains a private key
-    if ! openssl rsa -in "$importPath" -check -noout 2>/dev/null && ! openssl ec -in "$importPath" -check -noout 2>/dev/null; then
+    if ! openssl rsa -in "$importPath" -check -noout 2> /dev/null && ! openssl ec -in "$importPath" -check -noout 2> /dev/null; then
         msgbox "$(gettext "The file does not appear to contain a valid private key. The certificate file must contain both the certificate and private key.")"
         return
     fi
@@ -242,29 +563,37 @@ import-certificate() {
 }
 
 manage-certificate() {
+    local certAction
+
     while : ; do
-        local certAction
-        certAction="$(menulist "Generate" "View" "Import" "Go_Back")"
-        [[ $? -eq 1 ]] && return
+        certAction="$(menulist "$(gettext "Generate")" "$(gettext "View")" "$(gettext "Import")" "$(gettext "Go Back")")" || return
         case "$certAction" in
-            "Generate") generate-certificate ;;
-            "View") view-certificate ;;
-            "Import") import-certificate ;;
-            "Go_Back"|"") return ;;
+            "$(gettext "Generate")") generate-certificate ;;
+            "$(gettext "View")") view-certificate ;;
+            "$(gettext "Import")") import-certificate ;;
+            "$(gettext "Go Back")"|"") return ;;
         esac
     done
 }
 
-# main menu
-while : ; do
-    action="$(menulist "Connect" "Add_server" "Remove_server" "Manage_Certificate")"
-    [[ $? -eq 1 ]] && exit 0
-    action="${action,,}"
-    action="${action//_/-}"
-    if [[ "$action" == "exit" ]]; then
-            exit 0
-    fi
+main() {
+    local action
 
-    eval "$action"
+    require_command dialog dialog
+    load_servers
 
-done
+    while : ; do
+        action="$(menulist "$(gettext "Connect")" "$(gettext "Add server")" "$(gettext "Remove server")" "$(gettext "Manage Certificate")" "$(gettext "Exit")")" || exit 0
+        case "$action" in
+            "$(gettext "Connect")") connect ;;
+            "$(gettext "Add server")") add-server ;;
+            "$(gettext "Remove server")") remove-server ;;
+            "$(gettext "Manage Certificate")") manage-certificate ;;
+            "$(gettext "Exit")"|"") exit 0 ;;
+        esac
+    done
+}
+
+if [[ "${BARNARD_UI_TESTING:-0}" != "1" ]]; then
+    main "$@"
+fi
