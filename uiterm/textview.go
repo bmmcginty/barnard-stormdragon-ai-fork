@@ -77,6 +77,7 @@ func (t *Textview) updateParsedLines() {
 
 	if t.Lines == nil || width <= 0 {
 		t.parsedLines = nil
+		t.CurrentLine = 0
 		return
 	}
 
@@ -108,6 +109,7 @@ func (t *Textview) updateParsedLines() {
 		}
 	}
 	t.parsedLines = parsed
+	t.clampCurrentLine()
 }
 
 func (t *Textview) AddLine(line string) {
@@ -129,12 +131,9 @@ func (t *Textview) uiDraw() {
 
 	var reader *strings.Reader
 	writeableLines := t.y1 - t.y0
-	lineNum := 0
-	if writeableLines < len(t.parsedLines) {
-		lineNum = len(t.parsedLines) - writeableLines
-	}
+	lineNum := t.visibleStartLine(writeableLines)
 	//Beep()
-	for y := t.y0; y < writeableLines; y++ {
+	for y := t.y0; y < t.y1; y++ {
 		if lineNum < len(t.parsedLines) {
 			reader = strings.NewReader(t.parsedLines[lineNum])
 		} else {
@@ -152,6 +151,30 @@ func (t *Textview) uiDraw() {
 		lineNum++
 	} //each y
 } //func
+
+func (t *Textview) visibleStartLine(writeableLines int) int {
+	if writeableLines <= 0 || len(t.parsedLines) == 0 {
+		return 0
+	}
+
+	bottomStart := len(t.parsedLines) - writeableLines
+	if bottomStart < 0 {
+		bottomStart = 0
+	}
+	start := bottomStart - t.CurrentLine
+	if start < 0 {
+		return 0
+	}
+	return start
+}
+
+func (t *Textview) clampCurrentLine() {
+	if len(t.parsedLines) == 0 {
+		t.CurrentLine = 0
+		return
+	}
+	t.CurrentLine = bounded(t.CurrentLine, 0, len(t.parsedLines)-1)
+}
 
 func (t *Textview) uiKeyEvent(key Key) {
 }

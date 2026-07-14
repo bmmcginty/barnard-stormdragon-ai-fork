@@ -162,6 +162,7 @@ You can see the below keystrokes in your config file.
 Pressing tab inside the main window switches between the user/channel tree view and the message input box.
 When in the message input box:
 * left and right arrow keys move by character
+* up and down arrow keys move through previously submitted input
 * home/end moves to the beginning/end of the text respectively
 * enter submits the entered message
 

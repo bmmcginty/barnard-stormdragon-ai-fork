@@ -17,6 +17,9 @@ type Textbox struct {
 	active         bool
 	x0, y0, x1, y1 int
 	pos            int
+	history        []string
+	historyIndex   int
+	historyDraft   string
 }
 
 func (t *Textbox) uiInitialize(ui *Ui) {
@@ -100,14 +103,20 @@ func (t *Textbox) uiKeyEvent(key Key) {
 	case KeyCtrlC:
 		t.Text = ""
 		t.pos = 0
+		t.resetHistoryNavigation()
 		redraw = true
 	case KeyEnter:
+		text := t.Text
 		if t.Input != nil {
-			t.Input(t.ui, t, t.Text)
+			t.Input(t.ui, t, text)
 		}
+		t.addHistory(text)
 		t.Text = ""
 		t.pos = 0
+		t.resetHistoryNavigation()
 		redraw = true
+	case KeyArrowUp, KeyAltArrowUp, KeyArrowDown, KeyAltArrowDown:
+		redraw = t.handleHistoryKey(key)
 	case KeySpace:
 		t.uiCharacterEvent(' ')
 	case KeyBackspace:
@@ -135,4 +144,66 @@ func (t *Textbox) uiCharacterEvent(chr rune) {
 	t.Text = t.Text[:t.pos] + s + t.Text[t.pos:]
 	t.pos += len(s)
 	t.uiDraw()
+}
+
+func (t *Textbox) setText(text string) {
+	t.Text = text
+	t.pos = len(text)
+}
+
+func (t *Textbox) addHistory(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if len(t.history) > 0 && t.history[len(t.history)-1] == text {
+		t.historyIndex = len(t.history)
+		return
+	}
+	t.history = append(t.history, text)
+	t.historyIndex = len(t.history)
+}
+
+func (t *Textbox) handleHistoryKey(key Key) bool {
+	switch key {
+	case KeyArrowUp, KeyAltArrowUp:
+		return t.previousHistory()
+	case KeyArrowDown, KeyAltArrowDown:
+		return t.nextHistory()
+	default:
+		return false
+	}
+}
+
+func (t *Textbox) previousHistory() bool {
+	if len(t.history) == 0 {
+		return false
+	}
+	if t.historyIndex == len(t.history) {
+		t.historyDraft = t.Text
+	}
+	if t.historyIndex > 0 {
+		t.historyIndex--
+	}
+	t.setText(t.history[t.historyIndex])
+	return true
+}
+
+func (t *Textbox) nextHistory() bool {
+	if len(t.history) == 0 || t.historyIndex == len(t.history) {
+		return false
+	}
+	if t.historyIndex < len(t.history)-1 {
+		t.historyIndex++
+		t.setText(t.history[t.historyIndex])
+		return true
+	}
+	t.historyIndex = len(t.history)
+	t.setText(t.historyDraft)
+	t.historyDraft = ""
+	return true
+}
+
+func (t *Textbox) resetHistoryNavigation() {
+	t.historyIndex = len(t.history)
+	t.historyDraft = ""
 }
