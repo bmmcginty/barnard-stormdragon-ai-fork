@@ -15,7 +15,6 @@ import (
 	"strings"
 	"syscall"
 
-	"git.stormux.org/storm/barnard/audio"
 	"git.stormux.org/storm/barnard/config"
 	"git.stormux.org/storm/barnard/gumble/go-openal/openal"
 	"git.stormux.org/storm/barnard/gumble/gumble"
@@ -181,7 +180,6 @@ func main() {
 		Address:         *server,
 		MutedChannels:   make(map[uint32]bool),
 		NoiseSuppressor: noise.NewSuppressor(),
-		VoiceEffects:    audio.NewEffectsProcessor(gumble.AudioSampleRate),
 	}
 	b.Config.Buffers = *buffers
 
@@ -195,9 +193,6 @@ func main() {
 		b.UserConfig.SetNoiseSuppressionEnabled(true)
 	}
 	b.NoiseSuppressor.SetEnabled(enabled)
-
-	// Configure voice effects
-	b.VoiceEffects.SetEffect(audio.VoiceEffect(b.UserConfig.GetVoiceEffect()))
 
 	b.Config.Username = *username
 	b.Config.Password = *password

@@ -19,12 +19,6 @@ type NoiseProcessor interface {
 	IsEnabled() bool
 }
 
-// EffectsProcessor interface for voice effects
-type EffectsProcessor interface {
-	ProcessSamples(samples []int16)
-	IsEnabled() bool
-}
-
 // FilePlayer interface for file playback
 type FilePlayer interface {
 	GetAudioFrame() []int16
@@ -72,15 +66,13 @@ type Stream struct {
 	deviceSink  *openal.Device
 	contextSink *openal.Context
 
-	noiseProcessor        NoiseProcessor
-	noiseProcessorRight   NoiseProcessor
-	micAGC                *audio.AGC
-	micAGCRight           *audio.AGC
-	effectsProcessor      EffectsProcessor
-	effectsProcessorRight EffectsProcessor
-	filePlayer            FilePlayer
-	recorderMu            sync.RWMutex
-	recorder              Recorder
+	noiseProcessor      NoiseProcessor
+	noiseProcessorRight NoiseProcessor
+	micAGC              *audio.AGC
+	micAGCRight         *audio.AGC
+	filePlayer          FilePlayer
+	recorderMu          sync.RWMutex
+	recorder            Recorder
 }
 
 func New(client *gumble.Client, inputDevice *string, outputDevice *string, test bool) (*Stream, error) {
@@ -151,15 +143,6 @@ func (s *Stream) AttachStream(client *gumble.Client) {
 func (s *Stream) SetNoiseProcessor(np NoiseProcessor) {
 	s.noiseProcessor = np
 	s.noiseProcessorRight = cloneNoiseProcessor(np)
-}
-
-func (s *Stream) SetEffectsProcessor(ep EffectsProcessor) {
-	s.effectsProcessor = ep
-	s.effectsProcessorRight = cloneEffectsProcessor(ep)
-}
-
-func (s *Stream) GetEffectsProcessor() EffectsProcessor {
-	return s.effectsProcessor
 }
 
 func (s *Stream) SetFilePlayer(fp FilePlayer) {
@@ -542,7 +525,7 @@ func scaleForRecording(sample int16, volume float32) int16 {
 }
 
 func (s *Stream) processMonoSamples(samples []int16) {
-	s.processChannel(samples, s.noiseProcessor, s.micAGC, s.effectsProcessor)
+	s.processChannel(samples, s.noiseProcessor, s.micAGC)
 }
 
 func (s *Stream) processStereoSamples(samples []int16, frameSize int) {
@@ -562,8 +545,8 @@ func (s *Stream) processStereoSamples(samples []int16, frameSize int) {
 		right[i] = samples[idx+1]
 	}
 
-	s.processChannel(left, s.noiseProcessor, s.micAGC, s.effectsProcessor)
-	s.processChannel(right, s.noiseProcessorRight, s.micAGCRight, s.effectsProcessorRight)
+	s.processChannel(left, s.noiseProcessor, s.micAGC)
+	s.processChannel(right, s.noiseProcessorRight, s.micAGCRight)
 
 	for i := 0; i < frameSize; i++ {
 		idx := i * 2
@@ -572,15 +555,12 @@ func (s *Stream) processStereoSamples(samples []int16, frameSize int) {
 	}
 }
 
-func (s *Stream) processChannel(samples []int16, noiseProcessor NoiseProcessor, micAGC *audio.AGC, effectsProcessor EffectsProcessor) {
+func (s *Stream) processChannel(samples []int16, noiseProcessor NoiseProcessor, micAGC *audio.AGC) {
 	if noiseProcessor != nil && noiseProcessor.IsEnabled() {
 		noiseProcessor.ProcessSamples(samples)
 	}
 	if micAGC != nil {
 		micAGC.ProcessSamples(samples)
-	}
-	if effectsProcessor != nil && effectsProcessor.IsEnabled() {
-		effectsProcessor.ProcessSamples(samples)
 	}
 }
 
@@ -590,9 +570,6 @@ func (s *Stream) ensureStereoProcessors() {
 	}
 	if s.noiseProcessorRight == nil {
 		s.noiseProcessorRight = cloneNoiseProcessor(s.noiseProcessor)
-	}
-	if s.effectsProcessorRight == nil {
-		s.effectsProcessorRight = cloneEffectsProcessor(s.effectsProcessor)
 	}
 }
 
@@ -605,16 +582,6 @@ func (s *Stream) syncStereoProcessors() {
 		}
 	}
 
-	leftEffects, leftOk := s.effectsProcessor.(*audio.EffectsProcessor)
-	rightEffects, rightOk := s.effectsProcessorRight.(*audio.EffectsProcessor)
-	if leftOk && rightOk {
-		if leftEffects.IsEnabled() != rightEffects.IsEnabled() {
-			rightEffects.SetEnabled(leftEffects.IsEnabled())
-		}
-		if leftEffects.GetCurrentEffect() != rightEffects.GetCurrentEffect() {
-			rightEffects.SetEffect(leftEffects.GetCurrentEffect())
-		}
-	}
 }
 
 func cloneNoiseProcessor(np NoiseProcessor) NoiseProcessor {
@@ -624,19 +591,6 @@ func cloneNoiseProcessor(np NoiseProcessor) NoiseProcessor {
 	if suppressor, ok := np.(*noise.Suppressor); ok {
 		clone := noise.NewSuppressor()
 		clone.SetEnabled(suppressor.IsEnabled())
-		return clone
-	}
-	return nil
-}
-
-func cloneEffectsProcessor(ep EffectsProcessor) EffectsProcessor {
-	if ep == nil {
-		return nil
-	}
-	if processor, ok := ep.(*audio.EffectsProcessor); ok {
-		clone := audio.NewEffectsProcessor(gumble.AudioSampleRate)
-		clone.SetEnabled(processor.IsEnabled())
-		clone.SetEffect(processor.GetCurrentEffect())
 		return clone
 	}
 	return nil

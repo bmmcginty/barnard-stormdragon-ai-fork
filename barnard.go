@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"sync"
 
-	"git.stormux.org/storm/barnard/audio"
 	"git.stormux.org/storm/barnard/config"
 	"git.stormux.org/storm/barnard/fileplayback"
 	"git.stormux.org/storm/barnard/gumble/gumble"
@@ -58,9 +57,6 @@ type Barnard struct {
 
 	// Added for noise suppression
 	NoiseSuppressor *noise.Suppressor
-
-	// Added for voice effects
-	VoiceEffects *audio.EffectsProcessor
 
 	// Added for file playback
 	FileStream      *fileplayback.Player

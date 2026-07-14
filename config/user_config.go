@@ -27,7 +27,6 @@ type exportableConfig struct {
 	Username                *string
 	NotifyCommand           *string
 	NoiseSuppressionEnabled *bool
-	VoiceEffect             *int
 	Certificate             *string
 	RecordingFormat         *string
 	RecordingDirectory      *string
@@ -83,7 +82,6 @@ func (c *Config) LoadConfig() {
 		ScrollDown:             key(uiterm.KeyPgdn),
 		AdminMenu:              key(uiterm.KeyF11),
 		NoiseSuppressionToggle: key(uiterm.KeyF9),
-		CycleVoiceEffect:       key(uiterm.KeyF12),
 	}
 	if fileExists(c.fn) {
 		var data []byte
@@ -130,10 +128,6 @@ func (c *Config) LoadConfig() {
 		enabled := false
 		jc.NoiseSuppressionEnabled = &enabled
 	}
-	if c.config.VoiceEffect == nil {
-		effect := 0 // Default to EffectNone
-		jc.VoiceEffect = &effect
-	}
 	if c.config.Certificate == nil {
 		cert := string("")
 		jc.Certificate = &cert
@@ -166,7 +160,6 @@ func (c *Config) ensureHotkeys() {
 		ScrollDown:             key(uiterm.KeyPgdn),
 		AdminMenu:              key(uiterm.KeyF11),
 		NoiseSuppressionToggle: key(uiterm.KeyF9),
-		CycleVoiceEffect:       key(uiterm.KeyF12),
 	}
 	hotkeys := c.config.Hotkeys
 	if hotkeys.Talk == nil {
@@ -207,9 +200,6 @@ func (c *Config) ensureHotkeys() {
 	}
 	if hotkeys.NoiseSuppressionToggle == nil {
 		hotkeys.NoiseSuppressionToggle = defaults.NoiseSuppressionToggle
-	}
-	if hotkeys.CycleVoiceEffect == nil {
-		hotkeys.CycleVoiceEffect = defaults.CycleVoiceEffect
 	}
 }
 
@@ -316,18 +306,6 @@ func (c *Config) GetNoiseSuppressionEnabled() bool {
 
 func (c *Config) SetNoiseSuppressionEnabled(enabled bool) {
 	c.config.NoiseSuppressionEnabled = &enabled
-	c.SaveConfig()
-}
-
-func (c *Config) GetVoiceEffect() int {
-	if c.config.VoiceEffect == nil {
-		return 0
-	}
-	return *c.config.VoiceEffect
-}
-
-func (c *Config) SetVoiceEffect(effect int) {
-	c.config.VoiceEffect = &effect
 	c.SaveConfig()
 }
 
