@@ -3,6 +3,7 @@ package gumble
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"runtime"
@@ -101,6 +102,19 @@ func Dial(config *Config) (*Client, error) {
 	return DialWithDialer(new(net.Dialer), config, nil)
 }
 
+// tlsServerName returns the hostname portion of a Mumble server address for
+// TLS certificate verification and SNI.
+func tlsServerName(address string) (string, error) {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", fmt.Errorf("gumble: derive TLS server name from %q: %w", address, err)
+	}
+	if host == "" {
+		return "", fmt.Errorf("gumble: derive TLS server name from %q: empty host", address)
+	}
+	return host, nil
+}
+
 // DialWithDialer connects to the Mumble server at the address given in config.
 //
 // The function returns after the connection has been established, the initial
@@ -113,8 +127,43 @@ func Dial(config *Config) (*Client, error) {
 func DialWithDialer(dialer *net.Dialer, config *Config, tlsConfig *tls.Config) (*Client, error) {
 	start := time.Now()
 
-	conn, err := tls.DialWithDialer(dialer, "tcp", config.Address, tlsConfig)
+	rawConn, err := dialer.Dial("tcp", config.Address)
 	if err != nil {
+		return nil, err
+	}
+
+	// tls.Client cannot infer a server name from an already-open connection.
+	// Clone the caller's configuration before deriving it so reconnects and
+	// concurrent clients do not mutate a shared configuration.
+	if tlsConfig == nil {
+		tlsConfig = &tls.Config{}
+	} else {
+		tlsConfig = tlsConfig.Clone()
+	}
+	if tlsConfig.ServerName == "" {
+		serverName, err := tlsServerName(config.Address)
+		if err != nil {
+			rawConn.Close()
+			return nil, err
+		}
+		tlsConfig.ServerName = serverName
+	}
+	conn := tls.Client(rawConn, tlsConfig)
+	// net.Dialer.Timeout covers only the TCP dial. Apply the same bounded
+	// deadline to TLS negotiation so a peer that accepts but never responds
+	// cannot block startup indefinitely.
+	if dialer.Timeout > 0 {
+		if err := conn.SetDeadline(start.Add(dialer.Timeout)); err != nil {
+			rawConn.Close()
+			return nil, err
+		}
+	}
+	if err := conn.Handshake(); err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		rawConn.Close()
 		return nil, err
 	}
 
