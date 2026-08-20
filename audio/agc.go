@@ -2,41 +2,43 @@ package audio
 
 import (
 	"math"
+	"sync/atomic"
 )
 
 // AGC (Automatic Gain Control) processor for voice normalization
 type AGC struct {
-	targetLevel    float32 // Target RMS level (0.0-1.0)
-	maxGain        float32 // Maximum gain multiplier
-	minGain        float32 // Minimum gain multiplier
-	attackTime     float32 // Attack time coefficient
-	releaseTime    float32 // Release time coefficient
-	currentGain    float32 // Current gain value
-	envelope       float32 // Signal envelope
-	enabled        bool    // Whether AGC is enabled
-	compThreshold  float32 // Compression threshold
-	compRatio      float32 // Compression ratio
+	targetLevel   float32     // Target RMS level (0.0-1.0)
+	maxGain       float32     // Maximum gain multiplier
+	minGain       float32     // Minimum gain multiplier
+	attackTime    float32     // Attack time coefficient
+	releaseTime   float32     // Release time coefficient
+	currentGain   float32     // Current gain value
+	envelope      float32     // Signal envelope
+	enabled       atomic.Bool // Whether AGC is enabled; toggled outside the capture goroutine
+	compThreshold float32     // Compression threshold
+	compRatio     float32     // Compression ratio
 }
 
 // NewAGC creates a new AGC processor with sensible defaults for voice
 func NewAGC() *AGC {
-	return &AGC{
-		targetLevel:    0.18,  // Target 18% of max amplitude (balanced level)
-		maxGain:        8.0,   // Maximum 8x gain (about 18dB)
-		minGain:        0.1,   // Minimum 0.1x gain (-20dB)
-		attackTime:     0.005, // Fast attack (5ms)
-		releaseTime:    0.1,   // Slower release (100ms)
-		currentGain:    1.0,   // Start with unity gain
-		envelope:       0.0,   // Start with zero envelope
-		enabled:        true,  // Enable by default
-		compThreshold:  0.7,   // Compress signals above 70%
-		compRatio:      3.0,   // 3:1 compression ratio
+	agc := &AGC{
+		targetLevel:   0.12,  // Target 12% of max amplitude (conservative level)
+		maxGain:       4.0,   // Maximum 4x gain (about 12dB)
+		minGain:       0.25,  // Minimum 0.25x gain (-12dB)
+		attackTime:    0.008, // Fast attack (8ms)
+		releaseTime:   0.15,  // Slower release (150ms)
+		currentGain:   1.0,   // Start with unity gain
+		envelope:      0.0,   // Start with zero envelope
+		compThreshold: 0.85,  // Compress signals above 85%
+		compRatio:     2.0,   // 2:1 compression ratio (gentler)
 	}
+	agc.enabled.Store(true) // Enable by default
+	return agc
 }
 
 // ProcessSamples applies AGC processing to audio samples
 func (agc *AGC) ProcessSamples(samples []int16) {
-	if !agc.enabled || len(samples) == 0 {
+	if !agc.enabled.Load() || len(samples) == 0 {
 		return
 	}
 
@@ -106,10 +108,10 @@ func (agc *AGC) ProcessSamples(samples []int16) {
 		}
 
 		// Soft limiting to prevent clipping
-		if processed > 0.90 {
-			processed = 0.90 + (processed-0.90)*0.1
-		} else if processed < -0.90 {
-			processed = -0.90 + (processed+0.90)*0.1
+		if processed > 0.95 {
+			processed = 0.95 + (processed-0.95)*0.2
+		} else if processed < -0.95 {
+			processed = -0.95 + (processed+0.95)*0.2
 		}
 
 		// Convert back to int16
@@ -125,12 +127,12 @@ func (agc *AGC) ProcessSamples(samples []int16) {
 
 // SetEnabled enables or disables AGC processing
 func (agc *AGC) SetEnabled(enabled bool) {
-	agc.enabled = enabled
+	agc.enabled.Store(enabled)
 }
 
 // IsEnabled returns whether AGC is enabled
 func (agc *AGC) IsEnabled() bool {
-	return agc.enabled
+	return agc.enabled.Load()
 }
 
 // SetTargetLevel sets the target RMS level (0.0-1.0)

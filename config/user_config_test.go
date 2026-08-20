@@ -73,6 +73,38 @@ func TestConfigBackfillsRecordingDefaults(t *testing.T) {
 		t.Fatalf("expected scroll to bottom end, got %s", got)
 	}
 }
+
+func TestAGCDefaultsOnAndPersists(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "barnard.toml")
+	if err := os.WriteFile(configPath, []byte("[hotkeys]\ntalk = \"f1\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := NewConfig(&configPath)
+	if !cfg.GetAGCEnabled() {
+		t.Fatal("expected AGC to default to enabled")
+	}
+	if cfg.GetHotkeys().AGCToggle == nil {
+		t.Fatal("expected AGC toggle hotkey to be backfilled")
+	}
+	if got := *cfg.GetHotkeys().AGCToggle; got != uiterm.KeyF12 {
+		t.Fatalf("expected AGC toggle f12, got %s", got)
+	}
+
+	if err := cfg.SetAGCEnabled(false); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := NewConfig(&configPath)
+	if reloaded.GetAGCEnabled() {
+		t.Fatal("expected disabled AGC setting to persist")
+	}
+	if got := *reloaded.GetHotkeys().AGCToggle; got != uiterm.KeyF12 {
+		t.Fatalf("expected saved AGC toggle to reload as f12, got %s", got)
+	}
+}
+
+// Regression: malformed and IPv6 addresses were split at every colon and
+// could panic while merely reading a saved user preference.
 func TestMakeHostPortHandlesIPv6AndMalformedAddress(t *testing.T) {
 	host, port := makeHostPort("[2001:db8::1]:64739")
 	if host != "2001:db8::1" || port != 64739 {

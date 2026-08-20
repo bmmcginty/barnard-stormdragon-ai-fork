@@ -53,6 +53,7 @@ func (b *Barnard) connect(reconnect bool) bool {
 	b.Stream = stream
 	b.Stream.AttachStream(b.Client)
 	b.Stream.SetNoiseProcessor(b.NoiseSuppressor)
+	b.Stream.SetAGCEnabled(b.UserConfig.GetAGCEnabled())
 
 	// Initialize stereo encoder for file playback
 	b.Client.AudioEncoderStereo = opus.NewStereoEncoder()

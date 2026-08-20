@@ -31,6 +31,7 @@ type exportableConfig struct {
 	Username                *string
 	NotifyCommand           *string
 	NoiseSuppressionEnabled *bool
+	AGCEnabled              *bool
 	Certificate             *string
 	RecordingFormat         *string
 	RecordingDirectory      *string
@@ -109,6 +110,7 @@ func (c *Config) LoadConfig() {
 		ScrollToBottom:         key(uiterm.KeyEnd),
 		AdminMenu:              key(uiterm.KeyF11),
 		NoiseSuppressionToggle: key(uiterm.KeyF9),
+		AGCToggle:              key(uiterm.KeyF12),
 	}
 	if fileExists(c.fn) {
 		var data []byte
@@ -155,6 +157,11 @@ func (c *Config) LoadConfig() {
 		enabled := false
 		jc.NoiseSuppressionEnabled = &enabled
 	}
+	if c.config.AGCEnabled == nil {
+		// AGC has always been active for the microphone, so keep it on by default.
+		enabled := true
+		jc.AGCEnabled = &enabled
+	}
 	if c.config.Certificate == nil {
 		cert := string("")
 		jc.Certificate = &cert
@@ -190,6 +197,7 @@ func (c *Config) ensureHotkeys() {
 		ScrollToBottom:         key(uiterm.KeyEnd),
 		AdminMenu:              key(uiterm.KeyF11),
 		NoiseSuppressionToggle: key(uiterm.KeyF9),
+		AGCToggle:              key(uiterm.KeyF12),
 	}
 	hotkeys := c.config.Hotkeys
 	if hotkeys.Talk == nil {
@@ -239,6 +247,9 @@ func (c *Config) ensureHotkeys() {
 	}
 	if hotkeys.NoiseSuppressionToggle == nil {
 		hotkeys.NoiseSuppressionToggle = defaults.NoiseSuppressionToggle
+	}
+	if hotkeys.AGCToggle == nil {
+		hotkeys.AGCToggle = defaults.AGCToggle
 	}
 }
 
@@ -353,6 +364,22 @@ func (c *Config) SetNoiseSuppressionEnabled(enabled bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.config.NoiseSuppressionEnabled = &enabled
+	return c.saveConfigLocked()
+}
+
+func (c *Config) GetAGCEnabled() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.config.AGCEnabled == nil {
+		return true
+	}
+	return *c.config.AGCEnabled
+}
+
+func (c *Config) SetAGCEnabled(enabled bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.config.AGCEnabled = &enabled
 	return c.saveConfigLocked()
 }
 

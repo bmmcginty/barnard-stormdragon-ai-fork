@@ -111,6 +111,29 @@ func (b *Barnard) OnNoiseSuppressionToggle(ui *uiterm.Ui, key uiterm.Key) {
 	}
 }
 
+func (b *Barnard) OnAGCToggle(ui *uiterm.Ui, key uiterm.Key) {
+	enabled := b.toggleAGC()
+
+	if enabled {
+		b.UpdateGeneralStatus("AGC: ON", false)
+	} else {
+		b.UpdateGeneralStatus("AGC: OFF", false)
+	}
+}
+
+// toggleAGC flips the saved AGC preference and applies it to the active
+// stream, returning the new state.
+func (b *Barnard) toggleAGC() bool {
+	enabled := !b.UserConfig.GetAGCEnabled()
+	if err := b.UserConfig.SetAGCEnabled(enabled); err != nil {
+		b.AddOutputLine("AGC: could not save setting: " + err.Error())
+	}
+	if b.Stream != nil {
+		b.Stream.SetAGCEnabled(enabled)
+	}
+	return enabled
+}
+
 func (b *Barnard) UpdateGeneralStatus(text string, notice bool) {
 	b.statusText = text
 	b.statusNotice = notice
@@ -172,6 +195,14 @@ func (b *Barnard) CommandNoiseSuppressionToggle(ui *uiterm.Ui, cmd string) {
 		b.AddOutputLine("Noise suppression enabled")
 	} else {
 		b.AddOutputLine("Noise suppression disabled")
+	}
+}
+
+func (b *Barnard) CommandAGCToggle(ui *uiterm.Ui, cmd string) {
+	if b.toggleAGC() {
+		b.AddOutputLine("AGC enabled")
+	} else {
+		b.AddOutputLine("AGC disabled")
 	}
 }
 
@@ -397,6 +428,8 @@ func (b *Barnard) OnTextInput(ui *uiterm.Ui, textbox *uiterm.Textbox, text strin
 			b.CommandStatus(ui, cmdArgs)
 		case "noise":
 			b.CommandNoiseSuppressionToggle(ui, cmdArgs)
+		case "agc":
+			b.CommandAGCToggle(ui, cmdArgs)
 		case "record":
 			b.CommandRecord(ui, cmdArgs)
 		case "admin":
@@ -493,6 +526,7 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
 	b.Ui.AddCommandListener(b.CommandExit, "exit")
 	b.Ui.AddCommandListener(b.CommandStatus, "status")
 	b.Ui.AddCommandListener(b.CommandNoiseSuppressionToggle, "noise")
+	b.Ui.AddCommandListener(b.CommandAGCToggle, "agc")
 	b.Ui.AddCommandListener(b.CommandPlayFile, "file")
 	b.Ui.AddCommandListener(b.CommandStopFile, "stop")
 	b.Ui.AddCommandListener(b.CommandRecord, "record")
@@ -502,6 +536,7 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
 	b.Ui.AddKeyListener(b.OnVoiceToggle, b.Hotkeys.Talk)
 	b.Ui.AddKeyListener(b.OnTimestampToggle, b.Hotkeys.ToggleTimestamps)
 	b.Ui.AddKeyListener(b.OnNoiseSuppressionToggle, b.Hotkeys.NoiseSuppressionToggle)
+	b.Ui.AddKeyListener(b.OnAGCToggle, b.Hotkeys.AGCToggle)
 	b.Ui.AddKeyListener(b.OnRecordingToggle, b.Hotkeys.RecordToggle)
 	b.Ui.AddKeyListener(b.OnQuitPress, b.Hotkeys.Exit)
 	b.Ui.AddKeyListener(b.OnScrollOutputUp, b.Hotkeys.ScrollUp)
