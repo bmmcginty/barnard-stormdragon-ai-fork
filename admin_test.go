@@ -7,6 +7,20 @@ import (
 	"git.stormux.org/storm/barnard/uiterm"
 )
 
+// Regression: admin lookup helpers read Client.Users and Client.Channels while
+// TCP handlers could mutate those maps.
+func TestAdminLookupUsesClientSnapshot(t *testing.T) {
+	user := &gumble.User{Session: 7, Name: "Guest"}
+	channel := &gumble.Channel{ID: 4, Name: "Room"}
+	b := &Barnard{Client: &gumble.Client{Users: gumble.Users{7: user}, Channels: gumble.Channels{4: channel}}}
+	if b.findUser("guest") != user || b.findUser("7") != user {
+		t.Fatal("user lookup failed")
+	}
+	if b.findChannel("room") != channel || b.findChannel("4") != channel {
+		t.Fatal("channel lookup failed")
+	}
+}
+
 func TestParseToggleState(t *testing.T) {
 	tests := []struct {
 		name    string

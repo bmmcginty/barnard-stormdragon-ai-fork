@@ -14,6 +14,7 @@ import (
 )
 
 func (b *Barnard) start() {
+	b.reconnectStop = make(chan struct{})
 	b.Config.Attach(gumbleutil.AutoBitrate)
 	b.Config.Attach(b)
 	b.Config.Address = b.Address
@@ -46,7 +47,7 @@ func (b *Barnard) exitWithError(err error) {
 
 func (b *Barnard) connect(reconnect bool) bool {
 	var err error
-	_, err = gumble.DialWithDialer(new(net.Dialer), b.Config, &b.TLSConfig)
+	_, err = gumble.DialWithDialer(&net.Dialer{Timeout: 15 * time.Second}, b.Config, &b.TLSConfig)
 	if err != nil {
 		if reconnect {
 			b.Log(err.Error())
@@ -70,11 +71,11 @@ func (b *Barnard) connect(reconnect bool) bool {
 		b.toneTestSaver = saver
 		b.toneTestSaverDetach = b.Client.Config.AttachAudio(saver)
 
-		b.Connected = true
+		b.setConnected(true)
 		if b.toneTestAutoTransmit() {
 			b.toneTestStop = make(chan struct{})
 			go StartToneGenerator(b.Client, b.toneTestStop)
-			b.Tx = true
+			b.setTransmitting(true)
 			b.UpdateGeneralStatus(" Tx  ", true)
 			b.AddOutputLine("Tone test transmission started")
 		}
@@ -86,11 +87,17 @@ func (b *Barnard) connect(reconnect bool) bool {
 		b.exitWithError(err)
 		return false
 	}
-	b.Stream = stream
-	b.Stream.SetMicVolume(b.UserConfig.GetMicVolume(), false)
-	b.Stream.AttachStream(b.Client)
-	b.Stream.SetNoiseProcessor(b.NoiseSuppressor)
-	b.Stream.SetAGCEnabled(b.UserConfig.GetAGCEnabled())
+	stream.SetMicVolume(b.UserConfig.GetMicVolume(), false)
+	stream.AttachStream(b.Client)
+	stream.SetNoiseProcessor(b.NoiseSuppressor)
+	stream.SetAGCEnabled(b.UserConfig.GetAGCEnabled())
+	stream.SetErrorFunc(func(err error) {
+		if err != nil {
+			b.AddOutputLine(fmt.Sprintf("Microphone: %s", err.Error()))
+		} else {
+			b.AddOutputLine("Microphone: recovered")
+		}
+	})
 
 	// Initialize stereo encoder for file playback
 	b.Client.SetStereoEncoder(opus.NewStereoEncoder())
@@ -103,10 +110,13 @@ func (b *Barnard) connect(reconnect bool) bool {
 		b.Client.DisableStereoEncoder()
 		b.AddOutputLine(fmt.Sprintf("File playback: %s", err.Error()))
 	})
-	b.Stream.SetFilePlayer(b.FileStream)
+	stream.SetFilePlayer(b.FileStream)
 	b.FileStreamMutex.Unlock()
+	b.connectionMutex.Lock()
+	b.Stream = stream
+	b.connectionMutex.Unlock()
 
-	b.Connected = true
+	b.setConnected(true)
 	// Dial delivers OnConnect before connect creates the OpenAL stream, so
 	// start auto-transmit here as well for initial connections and reconnects.
 	b.startAutoTransmit()
@@ -117,18 +127,29 @@ func (b *Barnard) OnConnect(e *gumble.ConnectEvent) {
 	b.Client = e.Client
 
 	// Reset muted channels state on connect
+	b.MutedChannelsMutex.Lock()
 	b.MutedChannels = make(map[uint32]bool)
+	b.MutedChannelsMutex.Unlock()
 	b.userChannels = make(map[uint32]*gumble.Channel)
 	b.RecordingMutex.Lock()
 	b.recordingAllowed = nil
 	b.recordingStarting = false
 	b.RecordingMutex.Unlock()
 
-	b.Ui.SetActive(uiViewInput)
-	b.UiTree.Rebuild()
-	b.Ui.Refresh()
+	b.postUI(func() {
+		b.Ui.SetActive(uiViewInput)
+		b.UiTree.Rebuild()
+		b.Ui.Refresh()
+	})
 
-	for _, u := range b.Client.Users {
+	var users []*gumble.User
+	b.Client.Do(func() {
+		users = make([]*gumble.User, 0, len(b.Client.Users))
+		for _, u := range b.Client.Users {
+			users = append(users, u)
+		}
+	})
+	for _, u := range users {
 		b.UserConfig.UpdateUser(u)
 		b.rememberUserChannel(u)
 	}
@@ -143,22 +164,26 @@ func (b *Barnard) OnConnect(e *gumble.ConnectEvent) {
 	if wmsg != "" {
 		b.AddOutputLine(fmt.Sprintf("Welcome message: %s", wmsg))
 	}
-	b.Ui.Refresh()
 
 	b.startAutoTransmit()
 }
 
 func (b *Barnard) startAutoTransmit() {
-	if !b.AutoTransmit || b.Tx || b.Stream == nil {
+	if !b.AutoTransmit || b.isTransmitting() {
 		return
 	}
-	if err := b.Stream.StartSource(b.UserConfig.GetInputDevice()); err != nil {
-		b.AddOutputLine(fmt.Sprintf("auto-transmit failed: %s", err.Error()))
+	started := b.withStream(func(stream *gumbleopenal.Stream) {
+		if err := stream.StartSource(b.UserConfig.GetInputDevice()); err != nil {
+			b.AddOutputLine(fmt.Sprintf("auto-transmit failed: %s", err.Error()))
+			return
+		}
+		b.setTransmitting(true)
+		b.UpdateGeneralStatus(" AutoTx ", true)
+		b.AddOutputLine("Auto-transmit started")
+	})
+	if !started {
 		return
 	}
-	b.Tx = true
-	b.UpdateGeneralStatus(" AutoTx ", true)
-	b.AddOutputLine("Auto-transmit started")
 }
 
 func (b *Barnard) OnDisconnect(e *gumble.DisconnectEvent) {
@@ -175,6 +200,7 @@ func (b *Barnard) OnDisconnect(e *gumble.DisconnectEvent) {
 		reason = e.String
 	}
 	b.stopRecordingForDisconnect()
+	b.cleanupConnectionAudio()
 
 	// Tone test cleanup
 	if b.ToneTest {
@@ -191,20 +217,25 @@ func (b *Barnard) OnDisconnect(e *gumble.DisconnectEvent) {
 	} else {
 		b.AddOutputLine("Disconnected: " + reason)
 	}
-	b.Tx = false
-	b.Connected = false
-	b.UiTree.Rebuild()
-	b.Ui.Refresh()
+	b.setTransmitting(false)
+	b.setConnected(false)
+	b.postUI(func() {
+		b.UiTree.Rebuild()
+		b.Ui.Refresh()
+	})
 	go b.reconnectGoroutine()
 }
 
 func (b *Barnard) reconnectGoroutine() {
-	for {
-		res := b.connect(true)
-		if res == true {
-			break
+	for !b.reconnectCanceled() {
+		if b.connect(true) {
+			return
 		}
-		time.Sleep(15 * time.Second)
+		select {
+		case <-b.reconnectStop:
+			return
+		case <-time.After(15 * time.Second):
+		}
 	}
 }
 
@@ -213,15 +244,12 @@ func (b *Barnard) Log(s string) {
 }
 
 func (b *Barnard) OnTextMessage(e *gumble.TextMessageEvent) {
-	var public = false
-	for _, c := range e.Channels {
-		if c.Name == b.Client.Self.Channel.Name {
-			public = true
-			break
+	if b.isPublicTextMessage(e) {
+		sender := "Server"
+		if e.Sender != nil {
+			sender = e.Sender.Name
 		}
-	}
-	if public {
-		b.Notify("msg", e.Sender.Name, e.Message)
+		b.Notify("msg", sender, e.Message)
 		b.AddOutputMessage(e.Sender, e.Message)
 	} else {
 		var sender string
@@ -235,6 +263,28 @@ func (b *Barnard) OnTextMessage(e *gumble.TextMessageEvent) {
 	}
 }
 
+// isPublicTextMessage reports whether a message targets the current channel,
+// either directly or through a recursive channel-tree recipient.
+func (b *Barnard) isPublicTextMessage(e *gumble.TextMessageEvent) bool {
+	if e == nil || b.Client == nil || b.Client.Self == nil || b.Client.Self.Channel == nil {
+		return false
+	}
+	current := b.Client.Self.Channel
+	for _, channel := range e.Channels {
+		if sameChannel(channel, current) {
+			return true
+		}
+	}
+	for _, root := range e.Trees {
+		for channel := current; channel != nil; channel = channel.Parent {
+			if sameChannel(channel, root) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
 	notification, hasNotification := b.userChangeNotification(e)
 	if e.User != nil {
@@ -243,20 +293,20 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
 		// Check if user is joining a muted channel
 		if e.Type.Has(gumble.UserChangeConnected) || e.Type.Has(gumble.UserChangeChannel) {
 			// If the channel is muted, ensure the user is muted
-			if b.MutedChannels[e.User.Channel.ID] {
+			if b.isChannelMuted(e.User.Channel.ID) {
 				// Only mute if not already muted
 				if !e.User.LocallyMuted() {
-					b.UserConfig.ToggleMute(e.User)
+					if err := b.UserConfig.ToggleMute(e.User); err != nil {
+						b.AddOutputLine("Mute: could not save setting: " + err.Error())
+					}
 				}
-				if source := e.User.AudioSource(); source != nil {
-					source.SetGain(0)
-				}
+				b.updateUserGain(e.User)
 			}
 		}
 	}
 
 	if e.Type.Has(gumble.UserChangeDisconnected) {
-		if e.User == b.selectedUser {
+		if e.User == b.selectedUserValue() {
 			b.SetSelectedUser(nil)
 		}
 	}
@@ -281,8 +331,10 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
 		b.AddOutputLine(formatUserStats(e.User))
 	}
 	b.updateUserChannel(e)
-	b.RebuildUserChannelTreePreservingSelection()
-	b.Ui.Refresh()
+	b.postUI(func() {
+		b.RebuildUserChannelTreePreservingSelection()
+		b.Ui.Refresh()
+	})
 }
 
 type userChangeNotification struct {
@@ -382,8 +434,10 @@ func (b *Barnard) OnChannelChange(e *gumble.ChannelChangeEvent) {
 			b.AddOutputLine(fmt.Sprintf("Channel permissions for %s: %s", e.Channel.Name, permissionList(*permission)))
 		}
 	}
-	b.RebuildUserChannelTreePreservingSelection()
-	b.Ui.Refresh()
+	b.postUI(func() {
+		b.RebuildUserChannelTreePreservingSelection()
+		b.Ui.Refresh()
+	})
 }
 
 func formatUserStats(user *gumble.User) string {
@@ -461,34 +515,27 @@ func (b *Barnard) OnPermissionDenied(e *gumble.PermissionDeniedEvent) {
 }
 
 func (b *Barnard) OnUserList(e *gumble.UserListEvent) {
-	b.adminUserList = e.UserList
 	b.AddOutputLine(fmt.Sprintf("Admin: received %d registered users", len(e.UserList)))
-	b.UiAdmin.Rebuild()
-	b.Ui.Refresh()
+	b.postUI(func() { b.adminUserList = e.UserList; b.UiAdmin.Rebuild(); b.Ui.Refresh() })
 }
 
 func (b *Barnard) OnACL(e *gumble.ACLEvent) {
-	b.adminACL = e.ACL
 	if e.ACL != nil && e.ACL.Channel != nil {
 		b.AddOutputLine(fmt.Sprintf("Admin: received ACLs for %s", e.ACL.Channel.Name))
 	}
-	b.UiAdmin.Rebuild()
-	b.Ui.Refresh()
+	b.postUI(func() { b.adminACL = e.ACL; b.UiAdmin.Rebuild(); b.Ui.Refresh() })
 }
 
 func (b *Barnard) OnBanList(e *gumble.BanListEvent) {
-	b.adminBanList = e.BanList
 	b.AddOutputLine(fmt.Sprintf("Admin: received %d bans", len(e.BanList)))
-	b.UiAdmin.Rebuild()
-	b.Ui.Refresh()
+	b.postUI(func() { b.adminBanList = e.BanList; b.UiAdmin.Rebuild(); b.Ui.Refresh() })
 }
 
 func (b *Barnard) OnContextActionChange(e *gumble.ContextActionChangeEvent) {
 	if e.ContextAction != nil {
 		b.AddOutputLine(fmt.Sprintf("Admin: context action updated: %s", e.ContextAction.Name))
 	}
-	b.UiAdmin.Rebuild()
-	b.Ui.Refresh()
+	b.postUI(func() { b.UiAdmin.Rebuild(); b.Ui.Refresh() })
 }
 
 func (b *Barnard) OnServerConfig(e *gumble.ServerConfigEvent) {

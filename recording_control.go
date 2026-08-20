@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"git.stormux.org/storm/barnard/gumble/gumble"
+	"git.stormux.org/storm/barnard/gumble/gumbleopenal"
 	"git.stormux.org/storm/barnard/recording"
 	"git.stormux.org/storm/barnard/uiterm"
 )
@@ -179,10 +180,10 @@ func (b *Barnard) finishRecordingStart() {
 	}
 	b.Recorder = recorder
 	b.recordingStarting = false
+	// Recorder operations take RecordingMutex before connectionMutex. This
+	// prevents disconnect cleanup from destroying a stream during attachment.
+	b.withStream(func(stream *gumbleopenal.Stream) { stream.SetRecorder(recorder) })
 	b.RecordingMutex.Unlock()
-	if b.Stream != nil {
-		b.Stream.SetRecorder(recorder)
-	}
 	b.AddOutputLine(fmt.Sprintf("Recording started: %s", recorder.Path()))
 	b.Notify("recordstart", "me", recorder.Path())
 	b.renderGeneralStatus()
@@ -205,9 +206,7 @@ func (b *Barnard) detachRecorder() (*recording.Recorder, string, bool) {
 	}
 	b.Recorder = nil
 	b.recordingStarting = false
-	if b.Stream != nil {
-		b.Stream.SetRecorder(nil)
-	}
+	b.withStream(func(stream *gumbleopenal.Stream) { stream.SetRecorder(nil) })
 	return recorder, path, wasPending
 }
 

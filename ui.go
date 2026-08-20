@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"unicode"
 
 	"git.stormux.org/storm/barnard/gumble/gumble"
+	"git.stormux.org/storm/barnard/gumble/gumbleopenal"
 	"git.stormux.org/storm/barnard/uiterm"
 	"github.com/kennygrant/sanitize"
 	"github.com/nsf/termbox-go"
@@ -37,6 +39,14 @@ func esc(str string) string {
 	return sanitize.HTML(clean)
 }
 
+// postUI is the only path network and audio callbacks use to touch terminal
+// widgets. Work is dropped during shutdown or queue overload.
+func (b *Barnard) postUI(fn func()) {
+	if b.Ui != nil {
+		b.Ui.Post(fn)
+	}
+}
+
 func (b *Barnard) Notify(event string, who string, what string) {
 	// Notifications are best-effort: a slow external command must not block a
 	// UI or network callback. New events are dropped once the bounded queue is full.
@@ -47,7 +57,7 @@ func (b *Barnard) Notify(event string, who string, what string) {
 }
 
 func (b *Barnard) SetSelectedUser(user *gumble.User) {
-	b.selectedUser = user
+	b.setSelectedUserValue(user)
 	if user == nil {
 		if len(b.UiInput.Text) > 0 {
 		}
@@ -63,12 +73,21 @@ func (b *Barnard) GetInputStatus() string {
 
 func (b *Barnard) UpdateInputStatus(status string) {
 	status = truncateInputStatus(status)
-	b.UiInputStatus.Text = status
-	b.RebuildUserChannelTreePreservingSelection()
-	b.Ui.Refresh()
+	if b.Ui == nil {
+		return
+	}
+	b.Ui.Post(func() {
+		b.UiInputStatus.Text = status
+		// The initial connection status arrives after Run's first layout. Relayout
+		// so the prompt has cells to draw before focus is changed.
+		width, height := termbox.Size()
+		b.OnUiResize(b.Ui, width, height)
+		b.RebuildUserChannelTreePreservingSelection()
+		b.Ui.Refresh()
+	})
 }
 
-// truncateInputStatus shortens the prompt without splitting a multi-byte rune.
+// truncateInputStatus limits terminal cells without splitting UTF-8 runes.
 func truncateInputStatus(status string) string {
 	chars := []rune(status)
 	if len(chars) > 20 {
@@ -79,7 +98,11 @@ func truncateInputStatus(status string) string {
 
 func (b *Barnard) AddOutputLine(line string) {
 	now := time.Now()
-	b.UiOutput.AddLine(fmt.Sprintf("%s [%02d:%02d:%02d]", line, now.Hour(), now.Minute(), now.Second()))
+	formatted := fmt.Sprintf("%s [%02d:%02d:%02d]", line, now.Hour(), now.Minute(), now.Second())
+	if b.Ui == nil {
+		return
+	}
+	b.Ui.Post(func() { b.UiOutput.AddLine(formatted) })
 }
 
 func (b *Barnard) AddOutputMessage(sender *gumble.User, message string) {
@@ -135,19 +158,26 @@ func (b *Barnard) toggleAGC() bool {
 	if err := b.UserConfig.SetAGCEnabled(enabled); err != nil {
 		b.AddOutputLine("AGC: could not save setting: " + err.Error())
 	}
-	if b.Stream != nil {
-		b.Stream.SetAGCEnabled(enabled)
-	}
+	b.withStream(func(stream *gumbleopenal.Stream) {
+		stream.SetAGCEnabled(enabled)
+	})
 	return enabled
 }
 
 func (b *Barnard) UpdateGeneralStatus(text string, notice bool) {
-	b.statusText = text
-	b.statusNotice = notice
-	b.renderGeneralStatus()
+	b.postUI(func() {
+		b.statusText = text
+		b.statusNotice = notice
+		b.renderGeneralStatusNow()
+	})
 }
 
 func (b *Barnard) renderGeneralStatus() {
+	b.postUI(func() { b.renderGeneralStatusNow() })
+}
+
+// renderGeneralStatusNow must run on the UI-owning goroutine.
+func (b *Barnard) renderGeneralStatusNow() {
 	text := b.statusText
 	notice := b.statusNotice
 	if notice {
@@ -241,7 +271,7 @@ func (b *Barnard) CommandPlayFile(ui *uiterm.Ui, cmd string) {
 		}
 	}
 
-	if !b.Connected {
+	if !b.isConnected() {
 		b.AddOutputLine("Not connected to server")
 		return
 	}
@@ -252,8 +282,12 @@ func (b *Barnard) CommandPlayFile(ui *uiterm.Ui, cmd string) {
 
 	b.FileStreamMutex.Lock()
 	defer b.FileStreamMutex.Unlock()
+	if b.FileStream == nil {
+		b.AddOutputLine("File playback is unavailable while reconnecting")
+		return
+	}
 
-	if b.FileStream != nil && b.FileStream.IsPlaying() {
+	if b.FileStream.IsPlaying() {
 		b.AddOutputLine("Already playing a file. Use /stop first.")
 		return
 	}
@@ -267,16 +301,23 @@ func (b *Barnard) CommandPlayFile(ui *uiterm.Ui, cmd string) {
 	// Enable stereo encoder for file playback
 	b.Client.EnableStereoEncoder()
 
-	// Auto-start transmission if not already transmitting
-	if !b.Tx {
-		err := b.Stream.StartSource(b.UserConfig.GetInputDevice())
-		if err != nil {
-			b.AddOutputLine(fmt.Sprintf("Error starting transmission: %s", err.Error()))
+	// Auto-start transmission if not already transmitting. FileStreamMutex is
+	// held here, before withStream's connection mutex, matching cleanup.
+	if !b.isTransmitting() {
+		var startErr error
+		started := b.withStream(func(stream *gumbleopenal.Stream) {
+			startErr = stream.StartSource(b.UserConfig.GetInputDevice())
+		})
+		if !started {
+			startErr = errors.New("audio unavailable while reconnecting")
+		}
+		if startErr != nil {
+			b.AddOutputLine(fmt.Sprintf("Error starting transmission: %s", startErr))
 			b.FileStream.Stop()
 			b.Client.DisableStereoEncoder()
 			return
 		}
-		b.Tx = true
+		b.setTransmitting(true)
 		b.UpdateGeneralStatus(" File ", true)
 	}
 
@@ -313,15 +354,15 @@ func (b *Barnard) CommandStopFile(ui *uiterm.Ui, cmd string) {
 }
 
 func (b *Barnard) setTransmit(ui *uiterm.Ui, val int) {
-	if b.Tx && val == 1 {
+	if b.isTransmitting() && val == 1 {
 		return
 	}
-	if b.Tx == false && val == 0 {
+	if !b.isTransmitting() && val == 0 {
 		return
 	}
-	if b.Tx {
+	if b.isTransmitting() {
 		b.Notify("micdown", "me", "")
-		b.Tx = false
+		b.setTransmitting(false)
 		b.UpdateGeneralStatus(" Idle ", false)
 		if b.ToneTest {
 			if b.toneTestStop != nil {
@@ -329,73 +370,96 @@ func (b *Barnard) setTransmit(ui *uiterm.Ui, val int) {
 				b.toneTestStop = nil
 			}
 		} else {
-			b.Stream.StopSource()
+			b.withStream(func(stream *gumbleopenal.Stream) { _ = stream.StopSource() })
 		}
-	} else if b.Connected == false {
+	} else if !b.isConnected() {
 		b.Notify("error", "me", "no tx while disconnected")
-		b.Tx = false
+		b.setTransmitting(false)
 		b.UpdateGeneralStatus("no tx while disconnected", true)
-	} else if b.MutedChannels[b.Client.Self.Channel.ID] {
+	} else if b.isChannelMuted(b.Client.Self.Channel.ID) {
 		// Check if current channel is muted
 		b.Notify("error", "me", "cannot transmit in muted channel")
-		b.Tx = false
+		b.setTransmitting(false)
 		b.UpdateGeneralStatus("cannot transmit in muted channel", true)
 	} else {
-		b.Tx = true
+		b.setTransmitting(true)
 		if b.ToneTest {
 			b.toneTestStop = make(chan struct{})
 			go StartToneGenerator(b.Client, b.toneTestStop)
 			b.Notify("micup", "me", "")
 			b.UpdateGeneralStatus(" Tx  ", true)
 		} else {
-			err := b.Stream.StartSource(b.UserConfig.GetInputDevice())
-			if err != nil {
-				b.Notify("error", "me", err.Error())
-				b.UpdateGeneralStatus(err.Error(), true)
-			} else {
+			started := b.withStream(func(stream *gumbleopenal.Stream) {
+				err := stream.StartSource(b.UserConfig.GetInputDevice())
+				if err != nil {
+					b.setTransmitting(false)
+					if fatalAudioOpenError(err) {
+						// A missing capture device cannot recover through normal
+						// transmission controls; exit so option 1 reports it on stderr.
+						b.exitWithError(fmt.Errorf("audio device initialization failed: %w", err))
+						return
+					}
+					b.Notify("error", "me", err.Error())
+					b.UpdateGeneralStatus(err.Error(), true)
+					return
+				}
 				b.Notify("micup", "me", "")
 				b.UpdateGeneralStatus(" Tx  ", true)
+			})
+			if !started {
+				b.setTransmitting(false)
+				b.UpdateGeneralStatus("audio unavailable while reconnecting", true)
 			}
 		}
 	}
+}
+
+func fatalAudioOpenError(err error) bool {
+	return errors.Is(err, gumbleopenal.ErrMic) || errors.Is(err, gumbleopenal.ErrInputDevice) || errors.Is(err, gumbleopenal.ErrOutputDevice)
 }
 
 func (b *Barnard) OnMicVolumeDown(ui *uiterm.Ui, key uiterm.Key) {
 	if b.ToneTest {
 		return
 	}
-	b.Stream.SetMicVolume(-0.1, true)
-	b.UserConfig.SetMicVolume(b.Stream.GetMicVolume())
-	if err := b.UserConfig.SaveConfig(); err != nil {
-		b.AddOutputLine("Microphone: could not save volume: " + err.Error())
-	}
+	b.withStream(func(stream *gumbleopenal.Stream) {
+		stream.SetMicVolume(-0.1, true)
+		b.UserConfig.SetMicVolume(stream.GetMicVolume())
+		if err := b.UserConfig.SaveConfig(); err != nil {
+			b.AddOutputLine("Microphone: could not save volume: " + err.Error())
+		}
+	})
 }
 
 func (b *Barnard) OnMicVolumeUp(ui *uiterm.Ui, key uiterm.Key) {
 	if b.ToneTest {
 		return
 	}
-	b.Stream.SetMicVolume(0.1, true)
-	b.UserConfig.SetMicVolume(b.Stream.GetMicVolume())
-	if err := b.UserConfig.SaveConfig(); err != nil {
-		b.AddOutputLine("Microphone: could not save volume: " + err.Error())
-	}
+	b.withStream(func(stream *gumbleopenal.Stream) {
+		stream.SetMicVolume(0.1, true)
+		b.UserConfig.SetMicVolume(stream.GetMicVolume())
+		if err := b.UserConfig.SaveConfig(); err != nil {
+			b.AddOutputLine("Microphone: could not save volume: " + err.Error())
+		}
+	})
 }
 
 func (b *Barnard) OnQuitPress(ui *uiterm.Ui, key uiterm.Key) {
+	b.stopReconnects()
 	b.StopRecordingIfActive(true)
 	b.Client.Disconnect()
 	b.Ui.Close()
 }
 
 func (b *Barnard) CommandExit(ui *uiterm.Ui, cmd string) {
+	b.stopReconnects()
 	b.StopRecordingIfActive(true)
 	b.Client.Disconnect()
 	b.Ui.Close()
 }
 
 func (b *Barnard) CommandStatus(ui *uiterm.Ui, cmd string) {
-	if b.Tx {
+	if b.isTransmitting() {
 		b.Notify("status", "me", "transmitting")
 	} else {
 		b.Notify("status", "me", "not transmitting")
@@ -485,9 +549,9 @@ func (b *Barnard) OnTextInput(ui *uiterm.Ui, textbox *uiterm.Textbox, text strin
 
 	// Not a command, send as chat message
 	if b.Client != nil && b.Client.Self != nil {
-		if b.selectedUser != nil {
-			b.selectedUser.Send(text)
-			b.AddOutputPrivateMessage(b.Client.Self, b.selectedUser, text)
+		if selectedUser := b.selectedUserValue(); selectedUser != nil {
+			selectedUser.Send(text)
+			b.AddOutputPrivateMessage(b.Client.Self, selectedUser, text)
 		} else {
 			b.Client.Self.Channel.Send(text, false)
 			b.AddOutputMessage(b.Client.Self, text)
@@ -527,8 +591,9 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
 	ui.Add(uiViewInput, &b.UiInput)
 
 	b.UiInputStatus = uiterm.Label{
-		Fg: uiterm.ColorBlack,
-		Bg: uiterm.ColorWhite,
+		Text: "[root]",
+		Fg:   uiterm.ColorBlack,
+		Bg:   uiterm.ColorWhite,
 	}
 	ui.Add(uiViewInputStatus, &b.UiInputStatus)
 
@@ -575,6 +640,7 @@ func (b *Barnard) OnUiInitialize(ui *uiterm.Ui) {
 	b.Ui.AddKeyListener(b.OnNoiseSuppressionToggle, b.Hotkeys.NoiseSuppressionToggle)
 	b.Ui.AddKeyListener(b.OnAGCToggle, b.Hotkeys.AGCToggle)
 	b.Ui.AddKeyListener(b.OnRecordingToggle, b.Hotkeys.RecordToggle)
+	b.Ui.AddKeyListener(b.OnClearPress, b.Hotkeys.ClearOutput)
 	b.Ui.AddKeyListener(b.OnQuitPress, b.Hotkeys.Exit)
 	b.Ui.AddKeyListener(b.OnScrollOutputUp, b.Hotkeys.ScrollUp)
 	b.Ui.AddKeyListener(b.OnScrollOutputDown, b.Hotkeys.ScrollDown)

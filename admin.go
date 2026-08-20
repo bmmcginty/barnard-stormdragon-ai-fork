@@ -65,7 +65,7 @@ func (b *Barnard) OpenAdminMenu() {
 		return
 	}
 	b.adminReturnItem = b.UiTree.ActiveItem()
-	b.adminTargetUser = b.selectedUser
+	b.adminTargetUser = b.selectedUserValue()
 	b.adminTargetChan = b.Client.Self.Channel
 	if b.Ui.Active() == uiViewTree {
 		switch item := b.UiTree.ActiveItem().(type) {
@@ -83,7 +83,9 @@ func (b *Barnard) OpenAdminMenu() {
 	if b.adminTargetChan != nil {
 		b.adminTargetChan.RequestPermission()
 	}
-	if root := b.Client.Channels[0]; root != nil && root != b.adminTargetChan {
+	var root *gumble.Channel
+	b.Client.Do(func() { root = b.Client.Channels[0] })
+	if root != nil && root != b.adminTargetChan {
 		root.RequestPermission()
 	}
 	b.UiAdmin.Rebuild()
@@ -490,11 +492,21 @@ func (b *Barnard) adminACLItems() []uiterm.TreeItem {
 }
 
 func (b *Barnard) adminContextActionItems() []uiterm.TreeItem {
-	if b.Client == nil || len(b.Client.ContextActions) == 0 {
+	if b.Client == nil {
+		return []uiterm.TreeItem{adminItem{label: "No context actions available"}}
+	}
+	var actions []*gumble.ContextAction
+	b.Client.Do(func() {
+		actions = make([]*gumble.ContextAction, 0, len(b.Client.ContextActions))
+		for _, action := range b.Client.ContextActions {
+			actions = append(actions, action)
+		}
+	})
+	if len(actions) == 0 {
 		return []uiterm.TreeItem{adminItem{label: "No context actions available"}}
 	}
 	items := []uiterm.TreeItem{}
-	for _, action := range b.Client.ContextActions {
+	for _, action := range actions {
 		ca := action
 		label := ca.Label
 		if label == "" {
@@ -854,7 +866,8 @@ func (b *Barnard) executeContextCommand(fields []string) {
 		b.AddOutputLine("Admin: usage /admin context <action> [server|user|channel] [target]")
 		return
 	}
-	action := b.Client.ContextActions[fields[1]]
+	var action *gumble.ContextAction
+	b.Client.Do(func() { action = b.Client.ContextActions[fields[1]] })
 	if action == nil {
 		b.AddOutputLine("Admin: context action not found")
 		return
@@ -993,39 +1006,47 @@ func (b *Barnard) findOrCreateACLRule(subjectType, subject string) *gumble.ACLRu
 	}
 }
 
-func (b *Barnard) findUser(token string) *gumble.User {
+func (b *Barnard) findUser(token string) (found *gumble.User) {
 	if b.Client == nil {
 		return nil
 	}
-	if session, err := strconv.ParseUint(token, 10, 32); err == nil {
-		if user := b.Client.Users[uint32(session)]; user != nil {
-			return user
+	b.Client.Do(func() {
+		if session, err := strconv.ParseUint(token, 10, 32); err == nil {
+			found = b.Client.Users[uint32(session)]
+			if found != nil {
+				return
+			}
 		}
-	}
-	for _, user := range b.Client.Users {
-		if strings.EqualFold(user.Name, token) {
-			return user
+		for _, user := range b.Client.Users {
+			if strings.EqualFold(user.Name, token) {
+				found = user
+				return
+			}
 		}
-	}
-	return nil
+	})
+	return found
 }
 
-func (b *Barnard) findChannel(token string) *gumble.Channel {
+func (b *Barnard) findChannel(token string) (found *gumble.Channel) {
 	if b.Client == nil {
 		return nil
 	}
 	token = strings.TrimSpace(token)
-	if id, err := strconv.ParseUint(token, 10, 32); err == nil {
-		if channel := b.Client.Channels[uint32(id)]; channel != nil {
-			return channel
+	b.Client.Do(func() {
+		if id, err := strconv.ParseUint(token, 10, 32); err == nil {
+			found = b.Client.Channels[uint32(id)]
+			if found != nil {
+				return
+			}
 		}
-	}
-	for _, channel := range b.Client.Channels {
-		if strings.EqualFold(channel.Name, token) {
-			return channel
+		for _, channel := range b.Client.Channels {
+			if strings.EqualFold(channel.Name, token) {
+				found = channel
+				return
+			}
 		}
-	}
-	return nil
+	})
+	return found
 }
 
 func (b *Barnard) findRegisteredUser(token string) *gumble.RegisteredUser {
@@ -1048,7 +1069,9 @@ func (b *Barnard) adminCanRoot(permission gumble.Permission) bool {
 	if b.Client == nil {
 		return true
 	}
-	return b.adminCanChannel(b.Client.Channels[0], permission)
+	var root *gumble.Channel
+	b.Client.Do(func() { root = b.Client.Channels[0] })
+	return b.adminCanChannel(root, permission)
 }
 
 func (b *Barnard) adminCanChannel(channel *gumble.Channel, permission gumble.Permission) bool {

@@ -14,8 +14,12 @@ import (
 )
 
 type TreeItem struct {
-	User    *gumble.User
-	Channel *gumble.Channel
+	User        *gumble.User
+	Channel     *gumble.Channel
+	display     string
+	userSession uint32
+	channelID   uint32
+	snapshot    bool
 }
 
 type Barnard struct {
@@ -27,25 +31,28 @@ type Barnard struct {
 	Address   string
 	TLSConfig tls.Config
 
-	Stream       *gumbleopenal.Stream
-	Tx           bool
-	AutoTransmit bool // auto-start transmission on connect
-	Connected    bool
+	Stream          *gumbleopenal.Stream
+	connectionMutex sync.RWMutex
+	Tx              bool
+	AutoTransmit    bool // auto-start transmission on connect
+	Connected       bool
+	stateMutex      sync.RWMutex
 
-	Ui              *uiterm.Ui
-	UiOutput        uiterm.Textview
-	UiInput         uiterm.Textbox
-	UiStatus        uiterm.Label
-	UiTree          uiterm.Tree
-	UiAdmin         uiterm.Tree
-	UiInputStatus   uiterm.Label
-	SelectedChannel *gumble.Channel
-	selectedUser    *gumble.User
-	adminTargetUser *gumble.User
-	adminTargetChan *gumble.Channel
-	adminReturnItem uiterm.TreeItem
-	statusText      string
-	statusNotice    bool
+	Ui                *uiterm.Ui
+	UiOutput          uiterm.Textview
+	UiInput           uiterm.Textbox
+	UiStatus          uiterm.Label
+	UiTree            uiterm.Tree
+	UiAdmin           uiterm.Tree
+	UiInputStatus     uiterm.Label
+	SelectedChannel   *gumble.Channel
+	selectedUser      *gumble.User
+	selectedUserMutex sync.RWMutex
+	adminTargetUser   *gumble.User
+	adminTargetChan   *gumble.Channel
+	adminReturnItem   uiterm.TreeItem
+	statusText        string
+	statusNotice      bool
 
 	notifyChannel chan []string
 
@@ -53,8 +60,9 @@ type Barnard struct {
 	exitMessage string
 
 	// Added for channel muting
-	MutedChannels map[uint32]bool
-	userChannels  map[uint32]*gumble.Channel
+	MutedChannels      map[uint32]bool
+	MutedChannelsMutex sync.RWMutex
+	userChannels       map[uint32]*gumble.Channel
 
 	// Added for noise suppression
 	NoiseSuppressor *noise.Suppressor
@@ -80,6 +88,30 @@ type Barnard struct {
 	adminBanList       gumble.BanList
 	adminUserList      gumble.RegisteredUsers
 	adminACL           *gumble.ACL
+
+	reconnectStop     chan struct{}
+	reconnectStopOnce sync.Once
+}
+
+// cleanupConnectionAudio releases connection-owned audio resources before a
+// reconnect replaces them. It is intentionally idempotent for repeated
+// disconnect notifications.
+func (b *Barnard) cleanupConnectionAudio() {
+	// Connection audio operations that use both resources take FileStreamMutex
+	// before connectionMutex, so cleanup follows that order as well.
+	b.FileStreamMutex.Lock()
+	if b.FileStream != nil {
+		_ = b.FileStream.Stop()
+		b.FileStream = nil
+	}
+	b.FileStreamMutex.Unlock()
+	b.connectionMutex.Lock()
+	if b.Stream != nil {
+		stream := b.Stream
+		b.Stream = nil
+		stream.Destroy()
+	}
+	b.connectionMutex.Unlock()
 }
 
 func (b *Barnard) cleanupToneTestAudio() {
@@ -93,12 +125,113 @@ func (b *Barnard) cleanupToneTestAudio() {
 	}
 }
 
+func (b *Barnard) updateUserGain(user *gumble.User) {
+	b.withStream(func(stream *gumbleopenal.Stream) {
+		stream.UpdateUserGain(user)
+	})
+}
+
+// withStream keeps a connection-owned stream alive for the complete operation.
+// Reconnect cleanup takes the write lock before destroying or replacing it.
+func (b *Barnard) withStream(action func(*gumbleopenal.Stream)) bool {
+	b.connectionMutex.RLock()
+	defer b.connectionMutex.RUnlock()
+	if b.Stream == nil {
+		return false
+	}
+	action(b.Stream)
+	return true
+}
+
+func (b *Barnard) isChannelMuted(channelID uint32) bool {
+	b.MutedChannelsMutex.RLock()
+	defer b.MutedChannelsMutex.RUnlock()
+	return b.MutedChannels[channelID]
+}
+
+func (b *Barnard) setChannelMuted(channelID uint32, muted bool) {
+	b.MutedChannelsMutex.Lock()
+	defer b.MutedChannelsMutex.Unlock()
+	if b.MutedChannels == nil {
+		b.MutedChannels = make(map[uint32]bool)
+	}
+	if muted {
+		b.MutedChannels[channelID] = true
+	} else {
+		delete(b.MutedChannels, channelID)
+	}
+}
+
+func (b *Barnard) selectedUserValue() *gumble.User {
+	b.selectedUserMutex.RLock()
+	defer b.selectedUserMutex.RUnlock()
+	return b.selectedUser
+}
+
+func (b *Barnard) setSelectedUserValue(user *gumble.User) {
+	b.selectedUserMutex.Lock()
+	b.selectedUser = user
+	b.selectedUserMutex.Unlock()
+}
+
+func (b *Barnard) isTransmitting() bool {
+	b.stateMutex.RLock()
+	defer b.stateMutex.RUnlock()
+	return b.Tx
+}
+
+func (b *Barnard) setTransmitting(transmitting bool) {
+	b.stateMutex.Lock()
+	b.Tx = transmitting
+	b.stateMutex.Unlock()
+}
+
+func (b *Barnard) isConnected() bool {
+	b.stateMutex.RLock()
+	defer b.stateMutex.RUnlock()
+	return b.Connected
+}
+
+func (b *Barnard) setConnected(connected bool) {
+	b.stateMutex.Lock()
+	b.Connected = connected
+	b.stateMutex.Unlock()
+}
+
+func (b *Barnard) stopReconnects() {
+	b.reconnectStopOnce.Do(func() {
+		if b.reconnectStop != nil {
+			close(b.reconnectStop)
+		}
+	})
+}
+
+func (b *Barnard) reconnectCanceled() bool {
+	if b.reconnectStop == nil {
+		return false
+	}
+	select {
+	case <-b.reconnectStop:
+		return true
+	default:
+		return false
+	}
+}
+
 func (b *Barnard) StopTransmission() {
-	if b.Tx {
+	if b.isTransmitting() {
 		b.Notify("micdown", "me", "")
-		b.Tx = false
+		b.setTransmitting(false)
 		b.UpdateGeneralStatus(" Idle ", false)
-		b.Stream.StopSource()
+		if b.ToneTest {
+			// Stop the tone generator.
+			if b.toneTestStop != nil {
+				close(b.toneTestStop)
+				b.toneTestStop = nil
+			}
+		} else {
+			b.withStream(func(stream *gumbleopenal.Stream) { _ = stream.StopSource() })
+		}
 	}
 }
 
@@ -114,7 +247,7 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
 			b.GotoChat()
 		}
 		if treeItem.User != nil {
-			if b.selectedUser == treeItem.User {
+			if b.selectedUserValue() == treeItem.User {
 				b.SetSelectedUser(nil)
 				b.GotoChat()
 			} else {
@@ -128,36 +261,29 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
 	if treeItem.Channel != nil {
 		if key == *b.Hotkeys.MuteToggle {
 			// Determine new channel mute state
-			channelWillBeMuted := !b.MutedChannels[treeItem.Channel.ID]
+			channelWillBeMuted := !b.isChannelMuted(treeItem.Channel.ID)
 
 			// Set all users in channel to the same mute state
 			users := makeUsersArray(treeItem.Channel.Users)
 			for _, u := range users {
 				// Explicitly set user mute state to match channel state
-				if channelWillBeMuted != u.LocallyMuted() {
+				if channelWillBeMuted && !u.LocallyMuted() {
+					if err := b.UserConfig.ToggleMute(u); err != nil {
+						b.AddOutputLine("Mute: could not save setting: " + err.Error())
+					}
+				} else if !channelWillBeMuted && u.LocallyMuted() {
 					if err := b.UserConfig.ToggleMute(u); err != nil {
 						b.AddOutputLine("Mute: could not save setting: " + err.Error())
 					}
 				}
 
-				if source := u.AudioSource(); source != nil {
-					if u.LocallyMuted() {
-						source.SetGain(0)
-					} else {
-						source.SetGain(u.Volume())
-					}
-				}
+				b.updateUserGain(u)
 			}
 
 			// Update channel mute state
-			if channelWillBeMuted {
-				b.MutedChannels[treeItem.Channel.ID] = true
-				// If this is the current channel, stop transmission
-				if b.Client.Self.Channel.ID == treeItem.Channel.ID && b.Tx {
-					b.StopTransmission()
-				}
-			} else {
-				delete(b.MutedChannels, treeItem.Channel.ID)
+			b.setChannelMuted(treeItem.Channel.ID, channelWillBeMuted)
+			if channelWillBeMuted && b.Client.Self.Channel.ID == treeItem.Channel.ID && b.isTransmitting() {
+				b.StopTransmission()
 			}
 
 			b.RebuildUserChannelTreePreservingSelection()
@@ -180,13 +306,7 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
 			if err := b.UserConfig.ToggleMute(treeItem.User); err != nil {
 				b.AddOutputLine("Mute: could not save setting: " + err.Error())
 			}
-			if source := treeItem.User.AudioSource(); source != nil {
-				if treeItem.User.LocallyMuted() {
-					source.SetGain(0)
-				} else {
-					source.SetGain(treeItem.User.Volume())
-				}
-			}
+			b.updateUserGain(treeItem.User)
 			b.RebuildUserChannelTreePreservingSelection()
 			b.Ui.Refresh()
 		}

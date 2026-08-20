@@ -3,7 +3,9 @@ package uiterm
 import (
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/nsf/termbox-go"
 )
@@ -20,8 +22,10 @@ type UiManager interface {
 type Ui struct {
 	Fg, Bg Attribute
 
-	close   chan bool
-	manager UiManager
+	close     chan struct{}
+	closeOnce sync.Once
+	events    chan func()
+	manager   UiManager
 
 	drawCount     int32
 	elements      map[string]*uiElement
@@ -39,7 +43,8 @@ type uiElement struct {
 
 func New(manager UiManager) *Ui {
 	ui := &Ui{
-		close:            make(chan bool, 10),
+		close:            make(chan struct{}),
+		events:           make(chan func(), 256),
 		elements:         make(map[string]*uiElement),
 		manager:          manager,
 		keyListeners:     make(map[Key][]KeyListener),
@@ -48,9 +53,24 @@ func New(manager UiManager) *Ui {
 	return ui
 }
 
+// Close is safe to call repeatedly and never blocks a caller.
 func (ui *Ui) Close() {
-	if termbox.IsInit {
-		ui.close <- true
+	ui.closeOnce.Do(func() { close(ui.close) })
+}
+
+// Post schedules UI work on Run's owning goroutine. It is deliberately
+// bounded: network callbacks must not block behind slow terminal rendering.
+func (ui *Ui) Post(fn func()) bool {
+	if fn == nil {
+		return true
+	}
+	select {
+	case <-ui.close:
+		return false
+	case ui.events <- fn:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -97,15 +117,37 @@ func (ui *Ui) Run(cmds chan string) error {
 		return nil
 	}
 	if err := termbox.Init(); err != nil {
-		return nil
+		return err
 	}
-	defer termbox.Close()
 	termbox.SetInputMode(termbox.InputAlt)
 
-	events := make(chan termbox.Event)
+	// Closing termbox wakes PollEvent. Keep delivery cancellable so the polling
+	// goroutine cannot become stranded trying to send after Run returns.
+	events := make(chan termbox.Event, 1)
+	pollDone := make(chan struct{})
 	go func() {
+		defer close(pollDone)
 		for {
-			events <- termbox.PollEvent()
+			event := termbox.PollEvent()
+			select {
+			case <-ui.close:
+				return
+			default:
+			}
+			select {
+			case events <- event:
+			case <-ui.close:
+				return
+			}
+		}
+	}()
+	defer func() {
+		termbox.Close()
+		// Some termbox backends do not wake PollEvent promptly on Close. A fatal
+		// startup failure must print its stderr error instead of hanging here.
+		select {
+		case <-pollDone:
+		case <-time.After(100 * time.Millisecond):
 		}
 	}()
 
@@ -119,7 +161,13 @@ func (ui *Ui) Run(cmds chan string) error {
 		select {
 		case <-ui.close:
 			return nil
-		case cmd := <-cmds:
+		case fn := <-ui.events:
+			fn()
+		case cmd, ok := <-cmds:
+			if !ok {
+				cmds = nil
+				continue
+			}
 			ui.onCommandEvent(cmd)
 		case event := <-events:
 			switch event.Type {
