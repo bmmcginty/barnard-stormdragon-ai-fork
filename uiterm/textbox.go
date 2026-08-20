@@ -2,7 +2,7 @@ package uiterm
 
 import (
 	"strings"
-	//	"unicode/utf8"
+	"unicode/utf8"
 
 	"github.com/nsf/termbox-go"
 )
@@ -41,6 +41,9 @@ func (t *Textbox) uiSetBounds(x0, y0, x1, y1 int) {
 }
 
 func (t *Textbox) uiDraw() {
+	if t.ui == nil {
+		return
+	}
 	t.ui.beginDraw()
 	defer t.ui.endDraw()
 
@@ -51,13 +54,16 @@ func (t *Textbox) uiDraw() {
 	if t.pos > len(t.Text) {
 		t.pos = len(t.Text)
 	}
+	for t.pos > 0 && t.pos < len(t.Text) && !utf8.RuneStart(t.Text[t.pos]) {
+		t.pos--
+	}
 	for y := t.y0; y < t.y1; y++ {
 		for x := t.x0; x < t.x1; x++ {
 			var chr rune
 			if ch, _, err := reader.ReadRune(); err != nil {
 				chr = ' '
 			} else {
-				chr = ch
+				chr = safeRune(ch)
 			}
 			termbox.SetCell(x, y, chr, termbox.Attribute(t.Fg), termbox.Attribute(t.Bg))
 		}
@@ -95,10 +101,16 @@ func (t *Textbox) uiKeyEvent(key Key) {
 		t.pos = len(t.Text)
 		redraw = true
 	case KeyArrowLeft:
-		t.pos -= 1
+		if t.pos > 0 {
+			_, size := utf8.DecodeLastRuneInString(t.Text[:t.pos])
+			t.pos -= size
+		}
 		redraw = true
 	case KeyArrowRight:
-		t.pos += 1
+		if t.pos < len(t.Text) {
+			_, size := utf8.DecodeRuneInString(t.Text[t.pos:])
+			t.pos += size
+		}
 		redraw = true
 	case KeyCtrlC:
 		t.Text = ""
@@ -119,12 +131,12 @@ func (t *Textbox) uiKeyEvent(key Key) {
 		redraw = t.handleHistoryKey(key)
 	case KeySpace:
 		t.uiCharacterEvent(' ')
-	case KeyBackspace:
-	case KeyBackspace2:
+	case KeyBackspace, KeyBackspace2:
 		if len(t.Text) > 0 {
 			if t.pos > 0 {
-				t.Text = t.Text[:t.pos-1] + t.Text[t.pos:]
-				t.pos -= 1
+				_, size := utf8.DecodeLastRuneInString(t.Text[:t.pos])
+				t.Text = t.Text[:t.pos-size] + t.Text[t.pos:]
+				t.pos -= size
 			}
 		}
 		//			if r, size := utf8.DecodeLastRuneInString(t.Text); r != utf8.RuneError {
@@ -135,7 +147,13 @@ func (t *Textbox) uiKeyEvent(key Key) {
 		//		}
 	}
 	if redraw {
-		t.uiDraw()
+		// Input callbacks may update another view (for example, append a chat
+		// message). Redraw every view after submission, not just this textbox.
+		if key == KeyEnter && t.ui != nil {
+			t.ui.Refresh()
+		} else {
+			t.uiDraw()
+		}
 	}
 }
 

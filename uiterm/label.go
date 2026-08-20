@@ -40,7 +40,7 @@ func (l *Label) uiDraw() {
 			if ch, _, err := reader.ReadRune(); err != nil {
 				chr = ' '
 			} else {
-				chr = ch
+				chr = safeRune(ch)
 			}
 			termbox.SetCell(x, y, chr, termbox.Attribute(l.Fg), termbox.Attribute(l.Bg))
 		}

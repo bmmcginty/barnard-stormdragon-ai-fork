@@ -2,6 +2,24 @@ package uiterm
 
 import "testing"
 
+// Regression: byte-based cursor movement split UTF-8 input, producing invalid
+// text when deleting or inserting beside a non-ASCII character.
+func TestTextboxEditsAtRuneBoundaries(t *testing.T) {
+	textbox := Textbox{Text: "aé", pos: len("aé")}
+	textbox.uiKeyEvent(KeyArrowLeft)
+	if textbox.pos != 1 {
+		t.Fatalf("cursor = %d, want rune boundary 1", textbox.pos)
+	}
+	textbox.uiKeyEvent(KeyBackspace)
+	if textbox.Text != "é" || textbox.pos != 0 {
+		t.Fatalf("after delete: %q at %d", textbox.Text, textbox.pos)
+	}
+	textbox.uiCharacterEvent('ß')
+	if textbox.Text != "ßé" {
+		t.Fatalf("insert produced %q", textbox.Text)
+	}
+}
+
 func TestTextboxHistoryNavigatesSubmittedText(t *testing.T) {
 	t.Parallel()
 

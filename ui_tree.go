@@ -10,15 +10,15 @@ import (
 func (ti TreeItem) String() string {
 	if ti.User != nil {
 		if ti.User.LocallyMuted() {
-			return "[MUTED] " + ti.User.Name
+			return "[MUTED] " + esc(ti.User.Name)
 		}
 		// Calculate total volume as percentage
 		boostPercent := float32(ti.User.Boost()-1) * 10
 		totalVolume := ti.User.Volume()*100 + boostPercent
-		return fmt.Sprintf("%s [%.0f%%]", ti.User.Name, totalVolume)
+		return fmt.Sprintf("%s [%.0f%%]", esc(ti.User.Name), totalVolume)
 	}
 	if ti.Channel != nil {
-		return "#" + ti.Channel.Name
+		return "#" + esc(ti.Channel.Name)
 	}
 	return ""
 }

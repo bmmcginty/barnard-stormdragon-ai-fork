@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
+	"unicode"
 
 	"git.stormux.org/storm/barnard/gumble/gumble"
 	"git.stormux.org/storm/barnard/uiterm"
@@ -24,18 +24,17 @@ const (
 	uiViewAdmin       = "admin"
 )
 
-func Beep() {
-	cmd := exec.Command("beep")
-	cmdout, err := cmd.Output()
-	if err != nil {
-		panic(err)
-	}
-	if cmdout != nil {
-	}
-}
-
+// esc makes server-supplied text safe for a terminal as well as for HTML.
+// HTML escaping alone leaves ANSI, OSC, DEL, and bidi/control characters able
+// to alter terminal state or obscure the displayed text.
 func esc(str string) string {
-	return sanitize.HTML(str)
+	clean := strings.Map(func(r rune) rune {
+		if r == 0x7f || unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) {
+			return -1
+		}
+		return r
+	}, str)
+	return sanitize.HTML(clean)
 }
 
 func (b *Barnard) Notify(event string, who string, what string) {
@@ -45,10 +44,6 @@ func (b *Barnard) Notify(event string, who string, what string) {
 	case b.notifyChannel <- []string{event, who, what}:
 	default:
 	}
-}
-
-func (b *Barnard) Beep() {
-	Beep()
 }
 
 func (b *Barnard) SetSelectedUser(user *gumble.User) {
@@ -67,12 +62,19 @@ func (b *Barnard) GetInputStatus() string {
 }
 
 func (b *Barnard) UpdateInputStatus(status string) {
-	if len(status) > 20 {
-		status = status[:17] + "..." + "]"
-	}
+	status = truncateInputStatus(status)
 	b.UiInputStatus.Text = status
 	b.RebuildUserChannelTreePreservingSelection()
 	b.Ui.Refresh()
+}
+
+// truncateInputStatus shortens the prompt without splitting a multi-byte rune.
+func truncateInputStatus(status string) string {
+	chars := []rune(status)
+	if len(chars) > 20 {
+		return string(chars[:17]) + "..." + "]"
+	}
+	return status
 }
 
 func (b *Barnard) AddOutputLine(line string) {

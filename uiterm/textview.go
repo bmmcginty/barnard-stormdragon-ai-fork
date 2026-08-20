@@ -84,8 +84,11 @@ func (t *Textview) updateParsedLines() {
 	parsed := make([]string, 0, len(t.Lines))
 	for _, line := range t.Lines {
 		var l = line
-		if t.showTimestamps == false {
-			l = strings.TrimSpace(strings.Split(line, "]")[1])
+		if !t.showTimestamps {
+			// Server and local messages need not have a timestamp prefix.
+			if _, text, ok := strings.Cut(line, "]"); ok {
+				l = strings.TrimSpace(text)
+			}
 		}
 		current := ""
 		chars := 0
@@ -143,7 +146,7 @@ func (t *Textview) uiDraw() {
 			var chr rune = ' '
 			if reader != nil {
 				if ch, _, err := reader.ReadRune(); err == nil {
-					chr = ch
+					chr = safeRune(ch)
 				} //no err
 			} //reader != nil
 			termbox.SetCell(x, y, chr, termbox.Attribute(t.Fg), termbox.Attribute(t.Bg))

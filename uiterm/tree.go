@@ -177,7 +177,7 @@ func (t *Tree) uiDraw() {
 			dx := x - t.x0
 			if reader != nil && level*2 <= dx {
 				if ch, _, err := reader.ReadRune(); err == nil {
-					chr = ch
+					chr = safeRune(ch)
 					fg, bg = item.TreeItemStyle(fg, bg, t.active && t.activeLine == line)
 				}
 			}
@@ -206,6 +206,9 @@ func (t *Tree) ActiveItem() TreeItem {
 }
 
 func (t *Tree) uiKeyEvent(key Key) {
+	if len(t.lines) == 0 {
+		return
+	}
 	var runHandler = true
 	switch key {
 	case KeyArrowUp:
@@ -222,6 +225,9 @@ func (t *Tree) uiKeyEvent(key Key) {
 }
 
 func (t *Tree) uiCharacterEvent(ch rune) {
+	if len(t.lines) == 0 {
+		return
+	}
 	if t.CharacterListener != nil {
 		t.CharacterListener(t.ui, t, t.lines[t.activeLine].Item, ch)
 	}
