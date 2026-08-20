@@ -1,599 +1,956 @@
-#!/bin/bash
-# barnard-ui
-# Description: Make managing servers with barnard easy.
-#
-# Copyright 2019, F123 Consulting, <information@f123.org>
-# Copyright 2019, Stormux, <storm_dragon@linux-a11y.org>
-# Copyright 2019, Storm Dragon, <storm_dragon@linux-a11y.org>
-#
-# This is free software; you can redistribute it and/or modify it under the
-# terms of the GNU General Public License as published by the Free
-# Software Foundation; either version 3, or (at your option) any later
-# version.
-#
-# This software is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-# General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this package; see the file COPYING.  If not, write to the Free
-# Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
-# 02110-1301, USA.
-#
-#--code--
+#!/usr/bin/env python3
+"""barnard-ui: text interface for managing Barnard servers and certificates.
 
-# the gettext essentials
-export TEXTDOMAIN=barnard-ui
-export TEXTDOMAINDIR=/usr/share/locale
-# shellcheck disable=SC1091
-if ! source gettext.sh 2> /dev/null; then
-    gettext() {
-        printf '%s\n' "$1"
-    }
-fi
+This is a Python reimplementation of the original shell UI. It keeps the
+dialog-based interface (important for screen reader users) and the same
+configuration file layout as the shell version.
+"""
 
-cacheDir="${XDG_CACHE_HOME:-$HOME/.cache}"
-configDir="$HOME/.config/barnard"
-serverFile="$configDir/servers.conf"
-certFile="$configDir/barnard.pem"
-logFile="$cacheDir/${0##*/}.log"
+import datetime
+import gettext
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import threading
+import time
 
-if ! mkdir -p "$cacheDir" "$configDir"; then
-    printf 'Could not create Barnard configuration directories.\n' >&2
-    exit 1
-fi
-if ! : > "$logFile"; then
-    printf 'Could not write log file: %s\n' "$logFile" >&2
-    exit 1
-fi
 
-# Settings to improve accessibility of dialog.
-export DIALOGOPTS='--insecure --no-lines --visit-items'
+# ---------------------------------------------------------------------------
+# Localization
+# ---------------------------------------------------------------------------
 
-declare -Ag mumbleServerList=()
-declare -Ag serverAddresses=()
-declare -Ag serverPorts=()
-declare -Ag serverPasswords=()
-declare -Ag serverInsecure=()
+def _setup_gettext():
+    try:
+        return gettext.translation(
+            "barnard-ui", localedir="/usr/share/locale", fallback=True
+        )
+    except Exception:
+        return gettext.NullTranslations()
 
-# Log writing function
-log() {
-    # Usage: command | log for just stdout.
-    # Or command |& log for stderr and stdout.
-    local line
-    while IFS= read -r line ; do
-        printf '%s\n' "$line" >> "$logFile"
-    done
-}
 
-fatal() {
-    local message="$*"
-    printf '%s\n' "$message" | log
-    if command -v dialog > /dev/null 2>&1; then
-        dialog --clear --msgbox "$message" 10 72
-    else
-        printf '%s\n' "$message" >&2
-    fi
-    exit 1
-}
+_ = _setup_gettext().gettext
 
-require_command() {
-    local commandName="$1"
-    local displayName="${2:-$1}"
-    if ! command -v "$commandName" > /dev/null 2>&1; then
-        fatal "$(gettext "Required command not found:") $displayName"
-    fi
-}
 
-inputbox() {
-    # Returns: text entered by the user
-    # Args 1, Instructions for box.
-    # args: 2 initial text (optional)
-    dialog --clear --backtitle "$(gettext "Enter text and press enter.")" \
-        --inputbox "$1" 0 0 "$2" --stdout
-}
+# ---------------------------------------------------------------------------
+# Paths and global state
+# ---------------------------------------------------------------------------
 
-passwordbox() {
-    # Returns: text entered by the user
-    # Args 1, Instructions for box.
-    # args: 2 initial text (optional)
-    dialog --clear --backtitle "$(gettext "Enter text and press enter.")" \
-        --passwordbox "$1" 0 0 "$2" --stdout
-}
+_HOME = os.path.expanduser("~")
+cache_dir = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.join(_HOME, ".cache")))
+config_dir = os.path.join(_HOME, ".config", "barnard")
+server_file = os.path.join(config_dir, "servers.conf")
+cert_file = os.path.join(config_dir, "barnard.pem")
+log_file = os.path.join(cache_dir, "barnard-ui.log")
+log_dir = os.path.join(_HOME, "barnard-logs")
+log_prefs_file = os.path.join(config_dir, "logging.conf")
 
-msgbox() {
-    # Returns: None
-    # Shows the provided message on the screen with an ok button.
-    dialog --clear --msgbox "$*" 10 72
-}
+session_log_file = ""
+save_session_logs = False
 
-yesno() {
-    # Returns: Yes or No
-    # Args: Question to user.
-    # Called  in if $(yesno) == "Yes"
-    # Or variable=$(yesno)
-    if dialog --clear --backtitle "$(gettext "Press 'Enter' for \"yes\" or 'Escape' for \"no\".")" --yesno "$*" 10 80 --stdout; then
-        echo "Yes"
-    else
-        echo "No"
-    fi
-}
+servers = {}
 
-menulist() {
-    # Args: menu options.
-    # returns: selected tag
-    local i
-    local -a menuList=()
-    for i in "$@" ; do
-        menuList+=("$i" "$i")
-    done
-    dialog --backtitle "$(gettext "Use the up and down arrow keys to find the option you want, then press enter to select it.")" \
-        --clear \
-        --no-tags \
-        --menu "$(gettext "Please select one")" 0 0 0 "${menuList[@]}" --stdout
-}
 
-trim() {
-    local value="$1"
-    value="${value#"${value%%[![:space:]]*}"}"
-    value="${value%"${value##*[![:space:]]}"}"
-    printf '%s' "$value"
-}
+class Server:
+    def __init__(self):
+        self.name = ""
+        self.address = ""
+        self.port = "64738"
+        self.password = ""
+        self.insecure = "0"
 
-field_is_valid() {
-    local value="$1"
-    [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]]
-}
 
-port_is_valid() {
-    local port="$1"
-    [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 ))
-}
+class ConfigError(Exception):
+    """Raised when servers.conf contains an entry we refuse to interpret."""
 
-parse_host_port() {
-    local hostPort
-    hostPort="$(trim "$1")"
-    parsedAddress=""
-    parsedPort="64738"
+    def __init__(self, lineno, line, problem):
+        self.lineno = lineno
+        self.line = line
+        self.problem = problem
+        super().__init__(
+            "%s: line %d: %s: %r" % (server_file, lineno, problem, line)
+        )
 
-    if [[ -z "$hostPort" ]]; then
-        return 1
-    fi
 
-    if [[ "$hostPort" =~ ^\[([^]]+)\](:([0-9]+))?$ ]]; then
-        parsedAddress="${BASH_REMATCH[1]}"
-        parsedPort="${BASH_REMATCH[3]:-64738}"
-    elif [[ "$hostPort" =~ ^(.+):([0-9]+)$ ]]; then
-        parsedAddress="${BASH_REMATCH[1]}"
-        parsedPort="${BASH_REMATCH[2]}"
-    elif [[ "$hostPort" =~ ^(.+):([^:]+)$ ]]; then
-        return 1
-    else
-        parsedAddress="$hostPort"
-    fi
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
 
-    parsedAddress="$(trim "$parsedAddress")"
-    if [[ -z "$parsedAddress" ]] || ! port_is_valid "$parsedPort"; then
-        return 1
-    fi
-    field_is_valid "$parsedAddress"
-}
+DIALOG_OPTS = ["--insecure", "--no-lines", "--visit-items"]
 
-parse_server_input() {
-    local raw="$1"
-    local hostPort
-    raw="$(trim "$raw")"
-    parsedPassword=""
 
-    if [[ -z "$raw" ]]; then
-        return 1
-    fi
+def run_dialog(args, capture_result=False):
+    """Run dialog.
 
-    if [[ "$raw" == *@* ]]; then
-        parsedPassword="${raw%%@*}"
-        hostPort="${raw#*@}"
-    else
-        hostPort="$raw"
-    fi
+    dialog draws its widgets on stderr and writes the selected value on stdout
+    when --stdout is used. Keep stderr attached to the terminal for display and
+    only capture stdout when a result is needed.
+    """
+    cmd = ["dialog", "--clear"] + DIALOG_OPTS + args
+    if capture_result:
+        cmd.append("--stdout")
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=None, text=True)
+    return subprocess.run(cmd)
 
-    field_is_valid "$parsedPassword" && parse_host_port "$hostPort"
-}
 
-add_server_record() {
-    local serverName
-    local serverAddress="$2"
-    local serverPort="$3"
-    local serverPassword="$4"
-    local insecure="${5:-0}"
-    serverName="$(trim "$1")"
+def msgbox(message):
+    run_dialog(["--msgbox", message, "10", "72"])
 
-    if [[ -z "$serverName" ]]; then
-        return 1
-    fi
-    if ! field_is_valid "$serverName" || ! field_is_valid "$serverAddress" || ! field_is_valid "$serverPassword"; then
-        return 1
-    fi
-    if ! port_is_valid "$serverPort"; then
-        return 1
-    fi
-    insecure="${insecure,,}"
-    if [[ "$insecure" == "true" || "$insecure" == "yes" || "$insecure" == "on" ]]; then
-        insecure="1"
-    fi
-    if [[ "$insecure" != "1" ]]; then
-        insecure="0"
-    fi
 
-    serverAddresses["$serverName"]="$serverAddress"
-    serverPorts["$serverName"]="$serverPort"
-    serverPasswords["$serverName"]="$serverPassword"
-    serverInsecure["$serverName"]="$insecure"
-    mumbleServerList["$serverName"]="$serverAddress:$serverPort"
-}
+def yesno(question):
+    proc = run_dialog(
+        [
+            "--backtitle",
+            _("Press 'Enter' for \"yes\" or 'Escape' for \"no\"."),
+            "--yesno",
+            question,
+            "10",
+            "80",
+        ],
+        capture_result=False,
+    )
+    return proc.returncode == 0
 
-server_names() {
-    printf '%s\n' "${!mumbleServerList[@]}" | LC_ALL=C sort
-}
 
-server_list_is_empty() {
-    (( ${#mumbleServerList[@]} == 0 ))
-}
+def inputbox(instructions, initial=""):
+    proc = run_dialog(
+        [
+            "--backtitle",
+            _("Enter text and press enter."),
+            "--inputbox",
+            instructions,
+            "0",
+            "0",
+            initial,
+        ],
+        capture_result=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.rstrip("\n")
 
-save_servers() {
-    local tmpFile="$serverFile.tmp"
-    local name
-    local insecure
 
-    if ! {
-        printf '# barnard-ui server list\n'
-        printf '# Passwords are stored only when provided; this file is written with mode 0600.\n\n'
-        while IFS= read -r name; do
-            [[ -z "$name" ]] && continue
-            if [[ "${serverInsecure[$name]}" == "1" ]]; then
-                insecure="true"
-            else
-                insecure="false"
-            fi
-            printf '[server]\n'
-            printf 'name = %s\n' "$name"
-            printf 'address = %s\n' "${serverAddresses[$name]}"
-            printf 'port = %s\n' "${serverPorts[$name]}"
-            printf 'password = %s\n' "${serverPasswords[$name]}"
-            printf 'insecure = %s\n\n' "$insecure"
-        done < <(server_names)
-    } > "$tmpFile"; then
-        rm -f "$tmpFile"
-        msgbox "$(gettext "Could not save server list.")"
-        return 1
-    fi
+def passwordbox(instructions, initial=""):
+    proc = run_dialog(
+        [
+            "--backtitle",
+            _("Enter text and press enter."),
+            "--passwordbox",
+            instructions,
+            "0",
+            "0",
+            initial,
+        ],
+        capture_result=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.rstrip("\n")
 
-    chmod 600 "$tmpFile" 2> /dev/null || true
-    if ! mv "$tmpFile" "$serverFile"; then
-        rm -f "$tmpFile"
-        msgbox "$(gettext "Could not save server list.")"
-        return 1
-    fi
-}
 
-load_servers() {
-    local line
-    local name
-    local address
-    local port
-    local password
-    local insecure
-    local key
-    local value
-    local inServerSection=0
-    local needsRewrite=0
+def menulist(options):
+    items = []
+    for option in options:
+        items.extend([option, option])
+    proc = run_dialog(
+        [
+            "--backtitle",
+            _(
+                "Use the up and down arrow keys to find the option you want, "
+                "then press enter to select it."
+            ),
+            "--no-tags",
+            "--menu",
+            _("Please select one"),
+            "0",
+            "0",
+            "0",
+        ]
+        + items,
+        capture_result=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.rstrip("\n")
 
-    [[ -r "$serverFile" ]] || return 0
 
-    flush_server_section() {
-        if (( inServerSection )); then
-            if [[ -n "$name" || -n "$address" || -n "$password" ]]; then
-                if ! add_server_record "$name" "$address" "$port" "$password" "$insecure"; then
-                    printf 'Ignored invalid server entry from %s\n' "$serverFile" | log
-                    needsRewrite=1
-                fi
-            fi
-        fi
-        name=""
-        address=""
-        port="64738"
-        password=""
-        insecure="0"
-        inServerSection=0
-    }
+def log(line):
+    with open(log_file, "a") as handle:
+        handle.write(line + "\n")
+    if session_log_file:
+        with open(session_log_file, "a") as handle:
+            handle.write(line + "\n")
 
-    flush_server_section
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line="$(trim "$line")"
-        [[ -z "$line" || "$line" == \#* ]] && continue
 
-        if [[ "$line" =~ ^\[([^]]+)\]$ ]]; then
-            flush_server_section
-            if [[ "${BASH_REMATCH[1],,}" == "server" ]]; then
-                inServerSection=1
-            else
-                needsRewrite=1
-            fi
+def fatal(message):
+    log(message)
+    if shutil.which("dialog"):
+        msgbox(message)
+    else:
+        print(message, file=sys.stderr)
+    sys.exit(1)
+
+
+def require_command(command, display=None):
+    if shutil.which(command) is None:
+        fatal(_("Required command not found:") + " " + (display or command))
+
+
+def sanitize_filename(value):
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", value)
+
+
+def field_is_valid(value):
+    return "\n" not in value and "\r" not in value
+
+
+def port_is_valid(port):
+    return port.isdigit() and 1 <= int(port) <= 65535
+
+
+def format_address(address, port):
+    if ":" in address:
+        return "[%s]:%s" % (address, port)
+    return "%s:%s" % (address, port)
+
+
+# ---------------------------------------------------------------------------
+# servers.conf parsing and saving
+# ---------------------------------------------------------------------------
+
+def parse_host_port(host_port):
+    host_port = host_port.strip()
+    if not host_port:
+        return None, None
+
+    match = re.match(r"^\[([^\]]+)\](?::([0-9]+))?$", host_port)
+    if match:
+        address = match.group(1)
+        port = match.group(2) or "64738"
+    else:
+        match = re.match(r"^(.+):([0-9]+)$", host_port)
+        if match:
+            address = match.group(1)
+            port = match.group(2)
+        elif ":" in host_port:
+            return None, None
+        else:
+            address = host_port
+            port = "64738"
+
+    address = address.strip()
+    if not address or not port_is_valid(port) or not field_is_valid(address):
+        return None, None
+    return address, port
+
+
+def parse_server_input(raw):
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    if "@" in raw:
+        password, host_port = raw.split("@", 1)
+    else:
+        password, host_port = "", raw
+
+    if not field_is_valid(password):
+        return None
+    parsed = parse_host_port(host_port)
+    if parsed == (None, None):
+        return None
+    address, port = parsed
+    return address, port, password
+
+
+def _finalize_server(current, lineno, warnings):
+    if not current.name:
+        raise ConfigError(lineno, "[server]", _("server entry is missing a name"))
+    if current.name in servers:
+        warnings.append(
+            _("Duplicate server name '%s' (line %d); keeping the last entry.")
+            % (current.name, lineno)
+        )
+    value = current.insecure.lower()
+    current.insecure = "1" if value in ("1", "true", "yes", "on") else "0"
+    servers[current.name] = current
+
+
+def load_servers():
+    global servers
+    servers = {}
+    warnings = []
+
+    if not os.path.isfile(server_file):
+        return warnings
+
+    with open(server_file, "r", encoding="utf-8", errors="replace") as handle:
+        lines = handle.readlines()
+
+    current = None
+    current_lineno = 0
+
+    for lineno, raw in enumerate(lines, 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
             continue
-        fi
 
-        if (( ! inServerSection )); then
-            needsRewrite=1
+        match = re.match(r"^\[([^\]]+)\]$", line)
+        if match:
+            if current is not None:
+                _finalize_server(current, current_lineno, warnings)
+            section = match.group(1).strip().lower()
+            if section != "server":
+                raise ConfigError(
+                    lineno, raw.rstrip("\n"), _("unexpected section [%s]") % match.group(1)
+                )
+            current = Server()
+            current_lineno = lineno
             continue
-        fi
 
-        if [[ "$line" == *=* ]]; then
-            key="${line%%=*}"
-            value="${line#*=}"
-            key="$(trim "$key")"
-            key="${key,,}"
-            value="$(trim "$value")"
-            case "$key" in
-                name) name="$value" ;;
-                address|host) address="$value" ;;
-                port) port="$value" ;;
-                password) password="$value" ;;
-                insecure) insecure="$value" ;;
-                *) needsRewrite=1 ;;
-            esac
-        else
-            needsRewrite=1
-        fi
-    done < "$serverFile"
-    flush_server_section
+        if current is None:
+            raise ConfigError(
+                lineno, raw.rstrip("\n"), _("key outside of a [server] section")
+            )
 
-    if (( needsRewrite )); then
-        save_servers
-    fi
-}
+        if "=" not in line:
+            raise ConfigError(lineno, raw.rstrip("\n"), _("expected key=value"))
 
-config_has_nonempty_value() {
-    local key="$1"
-    local configFile="${2:-$HOME/.barnard.toml}"
-    local line
-    local currentKey
-    local value
-    key="${key,,}"
+        key, value = line.split("=", 1)
+        key = key.strip().lower()
 
-    [[ -r "$configFile" ]] || return 1
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line="$(trim "$line")"
-        [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
-        currentKey="${line%%=*}"
-        currentKey="$(trim "$currentKey")"
-        currentKey="${currentKey,,}"
-        [[ "$currentKey" == "$key" ]] || continue
-        value="${line#*=}"
-        value="$(trim "$value")"
-        [[ -z "$value" || "$value" == '""' || "$value" == "''" ]] && return 1
-        return 0
-    done < "$configFile"
-    return 1
-}
+        if key == "name":
+            current.name = value.strip()
+        elif key in ("address", "host"):
+            current.address = value.strip()
+        elif key == "port":
+            current.port = value.strip()
+            if not port_is_valid(current.port):
+                raise ConfigError(
+                    lineno, raw.rstrip("\n"), _("invalid port '%s'") % current.port
+                )
+        elif key == "password":
+            # Preserve trailing/leading spaces beyond the single separator space
+            # so passwords are not silently changed on a save/reload cycle.
+            current.password = value.lstrip()
+        elif key == "insecure":
+            current.insecure = value.strip()
+        else:
+            raise ConfigError(
+                lineno, raw.rstrip("\n"), _("unknown key '%s'") % key
+            )
 
-add-server() {
-    local serverName
-    local serverAddress
-    local serverPassword
-    local insecure="0"
+    if current is not None:
+        _finalize_server(current, current_lineno, warnings)
 
-    serverName="$(inputbox "$(gettext "Enter a name for the new server:")")" || return
-    serverName="$(trim "$serverName")"
-    if [[ -z "$serverName" ]]; then
-        msgbox "$(gettext "Server name cannot be empty.")"
+    return warnings
+
+
+def _fsync_dir(path):
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def save_servers():
+    lines = [
+        "# barnard-ui server list",
+        "# Passwords are stored only when provided; this file is written with mode 0600.",
+        "",
+    ]
+    for name in sorted(servers):
+        server = servers[name]
+        lines.append("[server]")
+        lines.append("name = %s" % server.name)
+        lines.append("address = %s" % server.address)
+        lines.append("port = %s" % server.port)
+        lines.append("password = %s" % server.password)
+        lines.append("insecure = %s" % ("true" if server.insecure == "1" else "false"))
+        lines.append("")
+    content = "\n".join(lines) + "\n"
+
+    tmp = server_file + ".tmp"
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        msgbox(_("Could not save server list."))
+        return False
+
+    # Keep a backup of the previous file before replacing it.
+    if os.path.exists(server_file):
+        try:
+            shutil.copy2(server_file, server_file + ".bak")
+        except OSError:
+            log(_("Could not create backup of %s") % server_file)
+
+    try:
+        os.replace(tmp, server_file)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        msgbox(_("Could not save server list."))
+        return False
+
+    _fsync_dir(config_dir)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# barnard.toml helper
+# ---------------------------------------------------------------------------
+
+def config_has_nonempty_value(key, config_file=None):
+    config_file = config_file or os.path.join(_HOME, ".barnard.toml")
+    key = key.lower()
+    if not os.path.isfile(config_file):
+        return False
+
+    with open(config_file, "r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            current_key, value = line.split("=", 1)
+            if current_key.strip().lower() != key:
+                continue
+            value = value.strip()
+            if not value or value in ('""', "''"):
+                return False
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Server management
+# ---------------------------------------------------------------------------
+
+def add_server():
+    name = inputbox(_("Enter a name for the new server:"))
+    if name is None:
         return
-    fi
-    if ! field_is_valid "$serverName"; then
-        msgbox "$(gettext "Server name cannot contain line breaks.")"
+    name = name.strip()
+    if not name:
+        msgbox(_("Server name cannot be empty."))
         return
-    fi
-
-    serverAddress="$(inputbox "$(gettext "Enter the address of the server. If the port is not standard, add it after a colon, like address:port.")")" || return
-    if ! parse_server_input "$serverAddress"; then
-        msgbox "$(gettext "Invalid server address or port.")"
+    if not field_is_valid(name):
+        msgbox(_("Server name cannot contain line breaks."))
         return
-    fi
 
-    serverPassword="$(passwordbox "$(gettext "Enter the server password, or leave it blank if there is no password:")")" || return
-    if [[ -n "$serverPassword" ]]; then
-        if ! field_is_valid "$serverPassword"; then
-            msgbox "$(gettext "Server password cannot contain line breaks.")"
+    raw = inputbox(
+        _(
+            "Enter the address of the server. If the port is not standard, "
+            "add it after a colon, like address:port."
+        )
+    )
+    if raw is None:
+        return
+    parsed = parse_server_input(raw)
+    if parsed is None:
+        msgbox(_("Invalid server address or port."))
+        return
+    address, port, input_password = parsed
+
+    password = passwordbox(
+        _("Enter the server password, or leave it blank if there is no password:")
+    )
+    if password is None:
+        return
+    if password:
+        if not field_is_valid(password):
+            msgbox(_("Server password cannot contain line breaks."))
             return
-        fi
-        parsedPassword="$serverPassword"
-    fi
+        input_password = password
 
-    if [[ "$(yesno "$(gettext "Skip server certificate verification for this server?")")" == "Yes" ]]; then
-        insecure="1"
-    fi
+    insecure = "1" if yesno(_("Skip server certificate verification for this server?")) else "0"
 
-    if ! add_server_record "$serverName" "$parsedAddress" "$parsedPort" "$parsedPassword" "$insecure"; then
-        msgbox "$(gettext "Could not add server. Check the server name, address, and password.")"
-        return
-    fi
-    save_servers || return
-    printf 'Added server %s %s:%s\n' "$serverName" "$parsedAddress" "$parsedPort" | log
-    msgbox "$(gettext "Added server") $serverName"
-}
-
-connect() {
-    local serverName
-    local barnardStatus
-    local -a names=()
-    local -a barnardArgs=()
-
-    if server_list_is_empty; then
-        msgbox "$(gettext "No saved servers. Add a server first.")"
-        return
-    fi
-
-    mapfile -t names < <(server_names)
-    serverName="$(menulist "${names[@]}" "$(gettext "Go Back")")" || return
-    if [[ -z "$serverName" || "$serverName" == "$(gettext "Go Back")" ]]; then
-        return
-    fi
-
-    require_command barnard barnard
-
-    barnardArgs=(-server "${serverAddresses[$serverName]}:${serverPorts[$serverName]}")
-    if [[ -n "${serverPasswords[$serverName]}" ]]; then
-        barnardArgs+=(-password "${serverPasswords[$serverName]}")
-    fi
-    if [[ "${serverInsecure[$serverName]}" == "1" ]]; then
-        barnardArgs+=(-insecure)
-    fi
-    if ! config_has_nonempty_value username; then
-        barnardArgs+=(-username "${USER}-${HOSTNAME}")
-    fi
-    if [[ -f "$certFile" ]] && ! config_has_nonempty_value certificate; then
-        barnardArgs+=(-certificate "$certFile")
-    fi
-
-    command barnard "${barnardArgs[@]}" --fifo "$configDir/cmd" --buffers 16 |& log
-    barnardStatus=${PIPESTATUS[0]}
-    if (( barnardStatus != 0 )); then
-        msgbox "$(gettext "Barnard exited with status") $barnardStatus. $(gettext "See log:") $logFile"
-    fi
-}
-
-remove-server() {
-    local serverName
-    local -a names=()
-
-    if server_list_is_empty; then
-        msgbox "$(gettext "No saved servers to remove.")"
-        return
-    fi
-
-    mapfile -t names < <(server_names)
-    serverName="$(menulist "${names[@]}" "$(gettext "Go Back")")" || return
-    if [[ -z "$serverName" || "$serverName" == "$(gettext "Go Back")" ]]; then
-        return
-    fi
-
-    unset "mumbleServerList[$serverName]"
-    unset "serverAddresses[$serverName]"
-    unset "serverPorts[$serverName]"
-    unset "serverPasswords[$serverName]"
-    unset "serverInsecure[$serverName]"
-    save_servers || return
-    printf 'Removed server %s\n' "$serverName" | log
-    msgbox "$(gettext "Removed server") $serverName"
-}
-
-generate-certificate() {
-    local commonName
-    require_command openssl openssl
-
-    if [[ -f "$certFile" ]]; then
-        if [[ "$(yesno "$(gettext "A certificate already exists. Do you want to replace it? This may affect your registered identity on servers.")")" != "Yes" ]]; then
+    if name in servers:
+        if not yesno(
+            _("A server named") + " " + name + " " + _("already exists. Overwrite it?")
+        ):
             return
-        fi
-    fi
-    commonName="$(inputbox "$(gettext "Enter a name for your certificate (e.g., your username):")" "barnard")" || return
-    [[ -z "$commonName" ]] && commonName="barnard"
 
-    if openssl req -x509 -newkey rsa:2048 -keyout "$certFile" -out "$certFile" -days 3650 -nodes -subj "/CN=$commonName" 2> /dev/null; then
-        chmod 600 "$certFile"
-        msgbox "$(gettext "Certificate generated successfully.")"
-    else
-        msgbox "$(gettext "Failed to generate certificate. Make sure openssl is installed.")"
-    fi
-}
+    server = Server()
+    server.name = name
+    server.address = address
+    server.port = port
+    server.password = input_password
+    server.insecure = insecure
+    servers[name] = server
 
-view-certificate() {
-    local certInfo
-    require_command openssl openssl
+    if save_servers():
+        log("Added server %s %s:%s" % (name, address, port))
+        msgbox(_("Added server") + " " + name)
 
-    if [[ ! -f "$certFile" ]]; then
-        msgbox "$(gettext "No certificate found.") $certFile"
+
+def remove_server():
+    if not servers:
+        msgbox(_("No saved servers to remove."))
         return
-    fi
-    certInfo=$(openssl x509 -in "$certFile" -noout -subject -dates -fingerprint 2> /dev/null)
-    if [[ -n "$certInfo" ]]; then
-        msgbox "$certInfo"
-    else
-        msgbox "$(gettext "Could not read certificate information.")"
-    fi
-}
 
-import-certificate() {
-    local importPath
-    require_command openssl openssl
-
-    importPath="$(inputbox "$(gettext "Enter the full path to your certificate file (PEM format with certificate and private key):")")" || return
-    [[ -z "$importPath" ]] && return
-
-    # Expand ~ if present
-    importPath="${importPath/#\~/$HOME}"
-
-    if [[ ! -f "$importPath" ]]; then
-        msgbox "$(gettext "File not found:") $importPath"
+    names = sorted(servers)
+    name = menulist(names + [_("Go Back")])
+    if name is None or name == _("Go Back"):
         return
-    fi
 
-    # Verify it's a valid certificate
-    if ! openssl x509 -in "$importPath" -noout 2> /dev/null; then
-        msgbox "$(gettext "The file does not appear to be a valid PEM certificate.")"
+    if not yesno(_("Remove server") + " " + name + "?"):
         return
-    fi
 
-    # Verify it contains a private key
-    if ! openssl rsa -in "$importPath" -check -noout 2> /dev/null && ! openssl ec -in "$importPath" -check -noout 2> /dev/null; then
-        msgbox "$(gettext "The file does not appear to contain a valid private key. The certificate file must contain both the certificate and private key.")"
+    del servers[name]
+    if save_servers():
+        log("Removed server %s" % name)
+        msgbox(_("Removed server") + " " + name)
+
+
+def run_barnard(args):
+    try:
+        proc = subprocess.Popen(
+            ["barnard"] + args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+    except OSError as error:
+        fatal(_("Could not run barnard:") + " " + str(error))
+
+    for line in proc.stdout:
+        log(line.rstrip("\n"))
+    proc.wait()
+    return proc.returncode
+
+
+def connect():
+    global session_log_file
+
+    if not servers:
+        msgbox(_("No saved servers. Add a server first."))
         return
-    fi
 
-    if [[ -f "$certFile" ]]; then
-        if [[ "$(yesno "$(gettext "A certificate already exists. Do you want to replace it?")")" != "Yes" ]]; then
+    names = sorted(servers)
+    name = menulist(names + [_("Go Back")])
+    if name is None or name == _("Go Back"):
+        return
+
+    require_command("barnard", "barnard")
+    server = servers[name]
+
+    args = ["-server", format_address(server.address, server.port)]
+    if server.password:
+        args += ["-password", server.password]
+    if server.insecure == "1":
+        args.append("-insecure")
+
+    if not config_has_nonempty_value("username"):
+        user = os.environ.get("USER", "")
+        host = os.uname().nodename
+        if user and host:
+            username = "%s-%s" % (user, host)
+        else:
+            username = user or host or "barnard"
+        args += ["-username", username]
+
+    if os.path.isfile(cert_file) and not config_has_nonempty_value("certificate"):
+        args += ["-certificate", cert_file]
+
+    session_log_file = ""
+    if save_session_logs:
+        safe_name = sanitize_filename(name)
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+        except OSError:
+            msgbox(_("Could not create logs directory:") + " " + log_dir)
+        else:
+            session_log_file = os.path.join(
+                log_dir, "%s-%s.log" % (safe_name, datetime.date.today().isoformat())
+            )
+            try:
+                with open(session_log_file, "a"):
+                    pass
+            except OSError:
+                msgbox(_("Could not write log file:") + " " + session_log_file)
+                session_log_file = ""
+
+    if session_log_file:
+        args += ["-log", "debug", "-logfile", session_log_file]
+
+    args += ["--fifo", os.path.join(config_dir, "cmd"), "--buffers", "16"]
+
+    status = run_barnard(args)
+    session_log_file = ""
+    if status != 0:
+        msgbox(
+            _("Barnard exited with status")
+            + " %d. " % status
+            + _("See log:")
+            + " "
+            + log_file
+        )
+
+
+# ---------------------------------------------------------------------------
+# Certificate management
+# ---------------------------------------------------------------------------
+
+def generate_certificate():
+    require_command("openssl", "openssl")
+
+    if os.path.isfile(cert_file):
+        if not yesno(
+            _(
+                "A certificate already exists. Do you want to replace it? "
+                "This may affect your registered identity on servers."
+            )
+        ):
             return
-        fi
-    fi
 
-    if cp "$importPath" "$certFile" && chmod 600 "$certFile"; then
-        msgbox "$(gettext "Certificate imported successfully.")"
-    else
-        msgbox "$(gettext "Failed to import certificate.")"
-    fi
-}
+    common_name = inputbox(
+        _("Enter a name for your certificate (e.g., your username):"), "barnard"
+    )
+    if common_name is None:
+        return
+    common_name = common_name.strip() or "barnard"
 
-manage-certificate() {
-    local certAction
+    proc = subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            cert_file,
+            "-out",
+            cert_file,
+            "-days",
+            "3650",
+            "-nodes",
+            "-subj",
+            "/CN=%s" % common_name,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 0:
+        os.chmod(cert_file, 0o600)
+        msgbox(_("Certificate generated successfully."))
+    else:
+        msgbox(_("Failed to generate certificate. Make sure openssl is installed."))
 
-    while : ; do
-        certAction="$(menulist "$(gettext "Generate")" "$(gettext "View")" "$(gettext "Import")" "$(gettext "Go Back")")" || return
-        case "$certAction" in
-            "$(gettext "Generate")") generate-certificate ;;
-            "$(gettext "View")") view-certificate ;;
-            "$(gettext "Import")") import-certificate ;;
-            "$(gettext "Go Back")"|"") return ;;
-        esac
-    done
-}
 
-main() {
-    local action
+def view_certificate():
+    require_command("openssl", "openssl")
 
-    require_command dialog dialog
-    load_servers
+    if not os.path.isfile(cert_file):
+        msgbox(_("No certificate found.") + " " + cert_file)
+        return
 
-    while : ; do
-        action="$(menulist "$(gettext "Connect")" "$(gettext "Add server")" "$(gettext "Remove server")" "$(gettext "Manage Certificate")" "$(gettext "Exit")")" || exit 0
-        case "$action" in
-            "$(gettext "Connect")") connect ;;
-            "$(gettext "Add server")") add-server ;;
-            "$(gettext "Remove server")") remove-server ;;
-            "$(gettext "Manage Certificate")") manage-certificate ;;
-            "$(gettext "Exit")"|"") exit 0 ;;
-        esac
-    done
-}
+    proc = subprocess.run(
+        [
+            "openssl",
+            "x509",
+            "-in",
+            cert_file,
+            "-noout",
+            "-subject",
+            "-dates",
+            "-fingerprint",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    info = proc.stdout.strip()
+    if info:
+        msgbox(info)
+    else:
+        msgbox(_("Could not read certificate information."))
 
-if [[ "${BARNARD_UI_TESTING:-0}" != "1" ]]; then
-    main "$@"
-fi
+
+def import_certificate():
+    require_command("openssl", "openssl")
+
+    path = inputbox(
+        _(
+            "Enter the full path to your certificate file "
+            "(PEM format with certificate and private key):"
+        )
+    )
+    if path is None:
+        return
+    path = os.path.expanduser(path)
+    if not path:
+        return
+
+    if not os.path.isfile(path):
+        msgbox(_("File not found:") + " " + path)
+        return
+
+    check_cert = subprocess.run(
+        ["openssl", "x509", "-in", path, "-noout"], capture_output=True, text=True
+    )
+    if check_cert.returncode != 0:
+        msgbox(_("The file does not appear to be a valid PEM certificate."))
+        return
+
+    check_rsa = subprocess.run(
+        ["openssl", "rsa", "-in", path, "-check", "-noout"],
+        capture_output=True,
+        text=True,
+    )
+    check_ec = subprocess.run(
+        ["openssl", "ec", "-in", path, "-check", "-noout"],
+        capture_output=True,
+        text=True,
+    )
+    if check_rsa.returncode != 0 and check_ec.returncode != 0:
+        msgbox(
+            _(
+                "The file does not appear to contain a valid private key. "
+                "The certificate file must contain both the certificate and "
+                "private key."
+            )
+        )
+        return
+
+    if os.path.isfile(cert_file):
+        if not yesno(_("A certificate already exists. Do you want to replace it?")):
+            return
+
+    try:
+        shutil.copyfile(path, cert_file)
+        os.chmod(cert_file, 0o600)
+        msgbox(_("Certificate imported successfully."))
+    except OSError:
+        msgbox(_("Failed to import certificate."))
+
+
+def manage_certificate():
+    while True:
+        action = menulist(
+            [_("Generate"), _("View"), _("Import"), _("Go Back")]
+        )
+        if action is None or action == _("Go Back") or action == "":
+            return
+        if action == _("Generate"):
+            generate_certificate()
+        elif action == _("View"):
+            view_certificate()
+        elif action == _("Import"):
+            import_certificate()
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+def load_logging_pref():
+    global save_session_logs
+    save_session_logs = False
+    if not os.path.isfile(log_prefs_file):
+        return
+    try:
+        with open(log_prefs_file, "r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key.strip().lower() != "savesessionlogs":
+                    continue
+                value = value.strip().lower()
+                save_session_logs = value in ("1", "true", "yes")
+    except OSError:
+        pass
+
+
+def save_logging_pref():
+    tmp = log_prefs_file + ".tmp"
+    try:
+        with open(tmp, "w") as handle:
+            handle.write("saveSessionLogs=%s\n" % ("1" if save_session_logs else "0"))
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, log_prefs_file)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        msgbox(_("Could not save logging preference."))
+        return False
+    return True
+
+
+def toggle_session_logging():
+    global save_session_logs
+    if save_session_logs:
+        question = _("Session logging is currently enabled. Disable it?")
+    else:
+        question = _(
+            "Session logging is currently disabled. "
+            "Enable saving logs to the logs directory?"
+        )
+    if yesno(question):
+        save_session_logs = not save_session_logs
+        save_logging_pref()
+
+
+def send_logs():
+    if shutil.which("wormhole") is None:
+        msgbox(_("Required command not found:") + " wormhole")
+        return
+
+    if not os.path.isdir(log_dir) or not any(
+        name.endswith(".log") for name in os.listdir(log_dir)
+    ):
+        msgbox(_("No logs to send. Logs are saved to:") + " " + log_dir)
+        return
+
+    bundle = os.path.join(
+        cache_dir,
+        "barnard-logs-%s.tar.gz" % datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
+    )
+    try:
+        with tarfile.open(bundle, "w:gz") as tar:
+            tar.add(log_dir, arcname=".")
+    except OSError:
+        msgbox(_("Could not create log archive."))
+        return
+
+    proc = subprocess.Popen(
+        ["wormhole", "send", bundle],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    output_lines = []
+    code = [None]
+
+    def reader():
+        for line in proc.stdout:
+            output_lines.append(line)
+            match = re.search(r"\b[0-9]+-[a-z]+-[a-z]+\b", line)
+            if match and code[0] is None:
+                code[0] = match.group(0)
+
+    reader_thread = threading.Thread(target=reader, daemon=True)
+    reader_thread.start()
+
+    deadline = time.time() + 10
+    while code[0] is None and time.time() < deadline and proc.poll() is None:
+        time.sleep(0.1)
+
+    if code[0] is not None:
+        msgbox(_("Wormhole code:") + " " + code[0])
+        proc.wait()
+        if proc.returncode == 0:
+            msgbox(_("Logs sent successfully."))
+        else:
+            msgbox(_("Log transfer did not complete successfully."))
+    else:
+        proc.kill()
+        proc.wait()
+        detail = "".join(output_lines[-3:]).strip()
+        if detail:
+            msgbox(_("Could not start wormhole transfer:") + " " + detail)
+        else:
+            msgbox(_("Could not start wormhole transfer."))
+
+    reader_thread.join(timeout=1)
+    try:
+        os.unlink(bundle)
+    except OSError:
+        pass
+
+
+def manage_logs():
+    while True:
+        label = _("Disable logs") if save_session_logs else _("Enable logs")
+        action = menulist([label, _("Send logs with wormhole"), _("Go Back")])
+        if action is None or action == _("Go Back") or action == "":
+            return
+        if action == label:
+            toggle_session_logging()
+        elif action == _("Send logs with wormhole"):
+            send_logs()
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main():
+    require_command("dialog", "dialog")
+
+    try:
+        warnings = load_servers()
+    except ConfigError as error:
+        fatal(str(error))
+
+    for warning in warnings:
+        msgbox(warning)
+
+    load_logging_pref()
+
+    while True:
+        action = menulist(
+            [
+                _("Connect"),
+                _("Add server"),
+                _("Remove server"),
+                _("Manage Certificate"),
+                _("Logs"),
+                _("Exit"),
+            ]
+        )
+        if action is None:
+            sys.exit(0)
+        if action == _("Connect"):
+            connect()
+        elif action == _("Add server"):
+            add_server()
+        elif action == _("Remove server"):
+            remove_server()
+        elif action == _("Manage Certificate"):
+            manage_certificate()
+        elif action == _("Logs"):
+            manage_logs()
+        elif action == _("Exit") or action == "":
+            sys.exit(0)
+
+
+def init_dirs():
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        os.makedirs(config_dir, exist_ok=True)
+    except OSError as error:
+        print("Could not create Barnard configuration directories: %s" % error, file=sys.stderr)
+        sys.exit(1)
+    try:
+        with open(log_file, "w"):
+            pass
+    except OSError:
+        print("Could not write log file: %s" % log_file, file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    init_dirs()
+    if os.environ.get("BARNARD_UI_TESTING", "0") != "1":
+        main()
