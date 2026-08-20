@@ -57,7 +57,7 @@ func New(client *gumble.Client, source Source) *Stream {
 		Volume:  1.0,
 		Source:  source,
 		Command: "ffmpeg",
-		pause:   make(chan struct{}),
+		pause:   make(chan struct{}, 1),
 		state:   StateInitial,
 	}
 }
@@ -124,7 +124,12 @@ func (s *Stream) Pause() error {
 	}
 	s.state = StatePaused
 	s.l.Unlock()
-	s.pause <- struct{}{}
+	// The process can exit after the state check. A buffered, coalesced pause
+	// request preserves the state transition without blocking the caller.
+	select {
+	case s.pause <- struct{}{}:
+	default:
+	}
 	return nil
 }
 
@@ -176,9 +181,12 @@ func (s *Stream) process() {
 				return
 			}
 			int16Buffer := make([]int16, frameSize)
+			s.l.Lock()
+			volume := s.Volume
+			s.l.Unlock()
 			for i := range int16Buffer {
 				float := float32(int16(binary.LittleEndian.Uint16(byteBuffer[i*2 : (i+1)*2])))
-				int16Buffer[i] = int16(s.Volume * float)
+				int16Buffer[i] = int16(volume * float)
 			}
 			atomic.AddInt64(&s.elapsed, int64(interval))
 			outgoing <- gumble.AudioBuffer(int16Buffer)

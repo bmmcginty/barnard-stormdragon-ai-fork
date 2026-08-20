@@ -1,6 +1,7 @@
 package fileplayback
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -10,22 +11,24 @@ import (
 	"time"
 
 	"git.stormux.org/storm/barnard/gumble/gumble"
-	"git.stormux.org/storm/barnard/gumble/go-openal/openal"
 )
 
 // Player handles file playback and mixing with microphone audio
 type Player struct {
-	client      *gumble.Client
-	filename    string
-	audioChan   chan gumble.AudioBuffer
-	stopChan    chan struct{}
-	mutex       sync.Mutex
-	playing     bool
-	errorFunc   func(error)
+	client    *gumble.Client
+	filename  string
+	audioChan chan gumble.AudioBuffer
+	stopChan  chan struct{}
+	ctx       context.Context
+	cancel    context.CancelFunc
+	cmd       *exec.Cmd
+	mutex     sync.Mutex
+	wg        sync.WaitGroup
+	playing   bool
+	stopping  bool
+	errorFunc func(error)
 
-	// Local playback
-	localSource *openal.Source
-	localBuffers openal.Buffers
+	localPlayback func([]byte)
 }
 
 // New creates a new file player
@@ -42,6 +45,14 @@ func (p *Player) SetErrorFunc(f func(error)) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	p.errorFunc = f
+}
+
+// SetLocalPlayback sets the callback that plays file audio locally. The
+// callback is called with nil when playback stops and should release resources.
+func (p *Player) SetLocalPlayback(f func([]byte)) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	p.localPlayback = f
 }
 
 func (p *Player) reportError(err error) {
@@ -65,17 +76,12 @@ func (p *Player) PlayFile(filename string) error {
 
 	p.filename = filename
 
-	// Initialize local playback
-	source := openal.NewSource()
-	p.localSource = &source
-	p.localSource.SetGain(1.0)
-
-	// Create buffers for local playback
-	p.localBuffers = openal.NewBuffers(64)
-
 	// Start the file reading goroutine
 	p.playing = true
+	p.stopping = false
 	p.stopChan = make(chan struct{})
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.wg.Add(1)
 	go p.readFileAudio()
 
 	return nil
@@ -84,31 +90,33 @@ func (p *Player) PlayFile(filename string) error {
 // Stop stops the currently playing file
 func (p *Player) Stop() error {
 	p.mutex.Lock()
-	defer p.mutex.Unlock()
-
 	if !p.playing {
+		p.mutex.Unlock()
 		return errors.New("no file playing")
 	}
-
-	close(p.stopChan)
-	p.playing = false
-
-	// Clean up local playback
-	if p.localSource != nil {
-		p.localSource.Stop()
-		p.localSource.Delete()
-		p.localSource = nil
+	if !p.stopping {
+		p.stopping = true
+		close(p.stopChan)
+		if p.cancel != nil {
+			p.cancel()
+		}
+		terminateProcessGroup(p.cmd)
 	}
-	if p.localBuffers != nil {
-		p.localBuffers.Delete()
-		p.localBuffers = nil
-	}
+	p.mutex.Unlock()
 
-	// Drain the audio channel
+	// A new PlayFile must not replace session state until ffmpeg and the old
+	// worker have exited, otherwise old audio can enter the new playback.
+	p.wg.Wait()
+	p.mutex.Lock()
+	p.playing, p.stopping, p.cancel, p.cmd = false, false, nil, nil
+	localPlayback := p.localPlayback
+	p.mutex.Unlock()
+	if localPlayback != nil {
+		localPlayback(nil)
+	}
 	for len(p.audioChan) > 0 {
 		<-p.audioChan
 	}
-
 	return nil
 }
 
@@ -129,37 +137,18 @@ func (p *Player) GetAudioFrame() []int16 {
 	}
 }
 
-// playLocalAudio plays audio through the local OpenAL source
 func (p *Player) playLocalAudio(data []byte) {
-	if p.localSource == nil {
-		return
-	}
-
-	// Reclaim processed buffers
-	if n := p.localSource.BuffersProcessed(); n > 0 {
-		reclaimedBufs := make(openal.Buffers, n)
-		p.localSource.UnqueueBuffers(reclaimedBufs)
-		p.localBuffers = append(p.localBuffers, reclaimedBufs...)
-	}
-
-	// If we have available buffers, queue more audio
-	if len(p.localBuffers) > 0 {
-		buffer := p.localBuffers[len(p.localBuffers)-1]
-		p.localBuffers = p.localBuffers[:len(p.localBuffers)-1]
-
-		// Set buffer data as stereo
-		buffer.SetData(openal.FormatStereo16, data, gumble.AudioSampleRate)
-		p.localSource.QueueBuffer(buffer)
-
-		// Start playing if not already
-		if p.localSource.State() != openal.Playing {
-			p.localSource.Play()
-		}
+	p.mutex.Lock()
+	localPlayback := p.localPlayback
+	p.mutex.Unlock()
+	if localPlayback != nil {
+		localPlayback(data)
 	}
 }
 
 // readFileAudio reads audio from the file via ffmpeg
 func (p *Player) readFileAudio() {
+	defer p.wg.Done()
 	interval := p.client.Config.AudioInterval
 	frameSize := p.client.Config.AudioFrameSize()
 
@@ -168,7 +157,11 @@ func (p *Player) readFileAudio() {
 	args := []string{"-loglevel", "error", "-i", p.filename}
 	args = append(args, "-ac", "2", "-ar", strconv.Itoa(gumble.AudioSampleRate), "-f", "s16le", "-")
 
-	cmd := exec.Command("ffmpeg", args...)
+	p.mutex.Lock()
+	ctx := p.ctx
+	p.mutex.Unlock()
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	configureProcessGroup(cmd)
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
 		p.mutex.Lock()
@@ -185,6 +178,9 @@ func (p *Player) readFileAudio() {
 		p.reportError(errors.New("failed to start ffmpeg: " + err.Error()))
 		return
 	}
+	p.mutex.Lock()
+	p.cmd = cmd
+	p.mutex.Unlock()
 
 	// Stereo has 2 channels, so we need twice the buffer size
 	byteBuffer := make([]byte, frameSize*2*2) // frameSize * 2 channels * 2 bytes per sample
@@ -195,28 +191,27 @@ func (p *Player) readFileAudio() {
 	for {
 		select {
 		case <-p.stopChan:
-			cmd.Process.Kill()
+			terminateProcessGroup(cmd)
 			cmd.Wait()
 			return
 		case <-ticker.C:
 			n, err := io.ReadFull(pipe, byteBuffer)
 			if err != nil || n != len(byteBuffer) {
-				// File finished playing
+				select {
+				case <-p.stopChan:
+					cmd.Wait()
+					return
+				default:
+				}
+				// File finished playing.
 				p.mutex.Lock()
 				p.playing = false
-				// Clean up local playback
-				if p.localSource != nil {
-					p.localSource.Stop()
-					p.localSource.Delete()
-					p.localSource = nil
-				}
-				if p.localBuffers != nil {
-					p.localBuffers.Delete()
-					p.localBuffers = nil
-				}
+				localPlayback := p.localPlayback
 				p.mutex.Unlock()
+				if localPlayback != nil {
+					localPlayback(nil)
+				}
 				cmd.Wait()
-				// Notify that file finished
 				p.reportError(errors.New("file playback finished"))
 				return
 			}

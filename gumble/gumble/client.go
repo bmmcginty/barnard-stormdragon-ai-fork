@@ -396,6 +396,13 @@ func (c *Client) Send(message Message) {
 	message.writeMessage(c)
 }
 
+// SetStereoEncoder installs the encoder used for stereo file playback.
+func (c *Client) SetStereoEncoder(encoder AudioEncoder) {
+	c.volatile.Lock()
+	defer c.volatile.Unlock()
+	c.AudioEncoderStereo = encoder
+}
+
 // EnableStereoEncoder switches to stereo encoding for file playback.
 func (c *Client) EnableStereoEncoder() {
 	c.volatile.Lock()
@@ -448,11 +455,16 @@ func (c *Client) UDPActive() bool {
 	return c.udpActive
 }
 
-// DisableStereoEncoder switches back to mono encoding for voice.
+// DisableStereoEncoder switches back to mono encoding for voice and
+// resets the stereo encoder so stale state does not bleed into the
+// next file playback.
 func (c *Client) DisableStereoEncoder() {
 	c.volatile.Lock()
 	defer c.volatile.Unlock()
 	c.useStereoEncoder = false
+	if c.AudioEncoderStereo != nil {
+		c.AudioEncoderStereo.Reset()
+	}
 }
 
 // IsStereoEncoderEnabled returns true if stereo encoding is currently active.
