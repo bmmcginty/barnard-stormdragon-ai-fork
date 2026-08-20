@@ -56,7 +56,7 @@ const (
 	DefaultDeviceSpecifier = 0x1004
 	DeviceSpecifier        = 0x1005
 	Extensions             = 0x1006
-	AllDevicesSpecifier        = 0x1013
+	AllDevicesSpecifier    = 0x1013
 )
 
 // ?
@@ -78,40 +78,38 @@ const (
 	CaptureSamples                = 0x312
 )
 
-//warning: this function does not free internal pointers
-//warning: memory leak
+// warning: this function does not free internal pointers
+// warning: memory leak
 func GetStrings(param int32) []string {
-start := C.alcGetString(nil,C.ALenum(param))
-ptr := unsafe.Pointer(start)
-if ptr == nil {
-return nil
-}
-ret := make([]string,0)
-offset := uint(0)
-for {
-slen := uint(C.strlen((*C.char)(ptr)))
-if slen==0 {
-break
-}
-ret=append(ret,C.GoStringN((*C.char)(ptr),C.int(slen)))
-ptr = unsafe.Pointer(uintptr(ptr) + uintptr(slen+1))
-offset+=(slen+1)
-}
-ptr = unsafe.Pointer(uintptr(ptr) - uintptr(offset))
-//This should be freeable; I've tried everything I can think of to free the returned pointer.
-//need to make sure alcchar doesn't have a weird free thingie, but that's all I can think of.
-//C.free(unsafe.Pointer(start))
-return ret
+	start := C.alcGetString(nil, C.ALenum(param))
+	ptr := unsafe.Pointer(start)
+	if ptr == nil {
+		return nil
+	}
+	ret := make([]string, 0)
+	offset := uint(0)
+	for {
+		slen := uint(C.strlen((*C.char)(ptr)))
+		if slen == 0 {
+			break
+		}
+		ret = append(ret, C.GoStringN((*C.char)(ptr), C.int(slen)))
+		ptr = unsafe.Pointer(uintptr(ptr) + uintptr(slen+1))
+		offset += (slen + 1)
+	}
+	ptr = unsafe.Pointer(uintptr(ptr) - uintptr(offset))
+	// This should be freeable; I've tried everything I can think of to free the returned pointer.
+	// need to make sure alcchar doesn't have a weird free thingie, but that's all I can think of.
+	// C.free(unsafe.Pointer(start))
+	return ret
 }
 
 type Device struct {
-	// Use uintptr instead of *C.ALCdevice.
-	// On Mac OS X, this value is 0x18 and might cause crash with a raw pointer.
-	handle uintptr
+	handle *C.ALCdevice
 }
 
 func (self *Device) getError() uint32 {
-	return uint32(C.alcGetError((*C.ALCdevice)(unsafe.Pointer(self.handle))))
+	return uint32(C.alcGetError(self.handle))
 }
 
 // Err() returns the most recent error generated
@@ -141,15 +139,13 @@ func OpenDevice(name string) *Device {
 	p := C.CString(name)
 	h := C.walcOpenDevice(p)
 	C.free(unsafe.Pointer(p))
-	if h==nil {
+	if h == nil {
 		return nil
 	}
-	return &Device{uintptr((unsafe.Pointer)(h))}
+	return &Device{h}
 }
 
-func (self *Device) cHandle() *C.ALCdevice {
-	return (*C.ALCdevice)(unsafe.Pointer(self.handle))
-}
+func (self *Device) cHandle() *C.ALCdevice { return self.handle }
 
 func (self *Device) CloseDevice() bool {
 	//TODO: really a method? or not?
@@ -160,13 +156,16 @@ func (self *Device) CreateContext() *Context {
 	// TODO: really a method?
 	// TODO: attrlist support
 	c := C.alcCreateContext(self.cHandle(), nil)
-	if c==nil {
-return nil
-}
-	return &Context{uintptr(unsafe.Pointer(c))}
+	if c == nil {
+		return nil
+	}
+	return &Context{c}
 }
 
 func (self *Device) GetIntegerv(param uint32, size uint32) (result []int32) {
+	if size == 0 {
+		return []int32{}
+	}
 	result = make([]int32, size)
 	C.walcGetIntegerv(self.cHandle(), C.ALCenum(param), C.ALCsizei(size), unsafe.Pointer(&result[0]))
 	return
@@ -187,10 +186,10 @@ func CaptureOpenDevice(name string, freq uint32, format Format, size uint32) *Ca
 	p := C.CString(name)
 	h := C.walcCaptureOpenDevice(p, C.ALCuint(freq), C.ALCenum(format), C.ALCsizei(size))
 	C.free(unsafe.Pointer(p))
-	if h==nil {
-return nil
-}
-	return &CaptureDevice{Device{uintptr(unsafe.Pointer(h))}, uint32(format.SampleSize())}
+	if h == nil {
+		return nil
+	}
+	return &CaptureDevice{Device{h}, uint32(format.SampleSize())}
 }
 
 // XXX: Override Device.CloseDevice to make sure the correct
@@ -213,10 +212,16 @@ func (self *CaptureDevice) CaptureStop() {
 }
 
 func (self *CaptureDevice) CaptureTo(data []byte) {
+	if len(data) == 0 {
+		return
+	}
 	C.alcCaptureSamples(self.cHandle(), unsafe.Pointer(&data[0]), C.ALCsizei(uint32(len(data))/self.sampleSize))
 }
 
 func (self *CaptureDevice) CaptureToInt16(data []int16) {
+	if len(data) == 0 {
+		return
+	}
 	C.alcCaptureSamples(self.cHandle(), unsafe.Pointer(&data[0]), C.ALCsizei(uint32(len(data))*2/self.sampleSize))
 }
 
@@ -229,10 +234,16 @@ func (self *CaptureDevice) CaptureMono16To(data []int16) {
 }
 
 func (self *CaptureDevice) CaptureStereo8To(data [][2]byte) {
+	if len(data) == 0 {
+		return
+	}
 	C.alcCaptureSamples(self.cHandle(), unsafe.Pointer(&data[0]), C.ALCsizei(uint32(len(data))*2/self.sampleSize))
 }
 
 func (self *CaptureDevice) CaptureStereo16To(data [][2]int16) {
+	if len(data) == 0 {
+		return
+	}
 	C.alcCaptureSamples(self.cHandle(), unsafe.Pointer(&data[0]), C.ALCsizei(uint32(len(data))*4/self.sampleSize))
 }
 
@@ -258,9 +269,7 @@ func (self *CaptureDevice) CapturedSamples() (size uint32) {
 // of the OpenAL state machine. Only one context can
 // be active in a given process.
 type Context struct {
-	// Use uintptr instead of *C.ALCcontext
-	// On Mac OS X, this value is 0x19 and might cause crash with a raw pointer.
-	handle uintptr
+	handle *C.ALCcontext
 }
 
 // A context that doesn't exist, useful for certain
@@ -268,9 +277,7 @@ type Context struct {
 // details).
 var NullContext Context
 
-func (self *Context) cHandle() *C.ALCcontext {
-	return (*C.ALCcontext)(unsafe.Pointer(self.handle))
-}
+func (self *Context) cHandle() *C.ALCcontext { return self.handle }
 
 // Renamed, was MakeContextCurrent.
 func (self *Context) Activate() bool {
@@ -290,15 +297,15 @@ func (self *Context) Suspend() {
 // Renamed, was DestroyContext.
 func (self *Context) Destroy() {
 	C.alcDestroyContext(self.cHandle())
-	self.handle = uintptr(unsafe.Pointer(nil))
+	self.handle = nil
 }
 
 // Renamed, was GetContextsDevice.
 func (self *Context) GetDevice() *Device {
-	return &Device{uintptr(unsafe.Pointer(C.alcGetContextsDevice(self.cHandle())))}
+	return &Device{C.alcGetContextsDevice(self.cHandle())}
 }
 
 // Renamed, was GetCurrentContext.
 func CurrentContext() *Context {
-	return &Context{uintptr(unsafe.Pointer(C.alcGetCurrentContext()))}
+	return &Context{C.alcGetCurrentContext()}
 }

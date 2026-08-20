@@ -40,6 +40,9 @@ func (self Listener) Set3f(param int32, value1, value2, value3 float32) {
 
 // Renamed, was Listenerfv.
 func (self Listener) Setfv(param int32, values []float32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walListenerfv(C.ALenum(param), unsafe.Pointer(&values[0]))
 }
 
@@ -55,6 +58,9 @@ func (self Listener) Set3i(param int32, value1, value2, value3 int32) {
 
 // Renamed, was Listeneriv.
 func (self Listener) Setiv(param int32, values []int32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walListeneriv(C.ALenum(param), unsafe.Pointer(&values[0]))
 }
 
@@ -72,6 +78,9 @@ func (self Listener) Get3f(param int32) (v1, v2, v3 float32) {
 
 // Renamed, was GetListenerfv.
 func (self Listener) Getfv(param int32, values []float32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walGetListenerfv(C.ALenum(param), unsafe.Pointer(&values[0]))
 	return
 }
@@ -90,6 +99,9 @@ func (self Listener) Get3i(param int32) (v1, v2, v3 int32) {
 
 // Renamed, was GetListeneriv.
 func (self Listener) Getiv(param int32, values []int32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walGetListeneriv(C.ALenum(param), unsafe.Pointer(&values[0]))
 }
 
@@ -127,22 +139,14 @@ func (self Listener) GetVelocity(result *Vector) {
 
 // Convenience method, see Listener.Setfv().
 func (self Listener) SetOrientation(at *Vector, up *Vector) {
-	tempSlice[0] = at[x]
-	tempSlice[1] = at[y]
-	tempSlice[2] = at[z]
-	tempSlice[3] = up[x]
-	tempSlice[4] = up[y]
-	tempSlice[5] = up[z]
-	self.Setfv(AlOrientation, tempSlice)
+	values := [6]float32{at[x], at[y], at[z], up[x], up[y], up[z]}
+	self.Setfv(AlOrientation, values[:])
 }
 
 // Convenience method, see Listener.Getfv().
 func (self Listener) GetOrientation(resultAt, resultUp *Vector) {
-	self.Getfv(AlOrientation, tempSlice)
-	resultAt[x] = tempSlice[0]
-	resultAt[y] = tempSlice[1]
-	resultAt[z] = tempSlice[2]
-	resultUp[x] = tempSlice[3]
-	resultUp[y] = tempSlice[4]
-	resultUp[z] = tempSlice[5]
+	var values [6]float32
+	self.Getfv(AlOrientation, values[:])
+	resultAt[x], resultAt[y], resultAt[z] = values[0], values[1], values[2]
+	resultUp[x], resultUp[y], resultUp[z] = values[3], values[4], values[5]
 }

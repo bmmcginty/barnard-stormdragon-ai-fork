@@ -29,6 +29,9 @@ type Buffers []Buffer
 // NewBuffers() creates n fresh buffers.
 // Renamed, was GenBuffers.
 func NewBuffers(n int) (buffers Buffers) {
+	if n <= 0 {
+		return Buffers{}
+	}
 	buffers = make(Buffers, n)
 	C.walGenBuffers(C.ALsizei(n), unsafe.Pointer(&buffers[0]))
 	return
@@ -36,8 +39,10 @@ func NewBuffers(n int) (buffers Buffers) {
 
 // Delete() deletes the given buffers.
 func (self Buffers) Delete() {
-	n := len(self)
-	C.walDeleteBuffers(C.ALsizei(n), unsafe.Pointer(&self[0]))
+	if len(self) == 0 {
+		return
+	}
+	C.walDeleteBuffers(C.ALsizei(len(self)), unsafe.Pointer(&self[0]))
 }
 
 // Renamed, was Bufferf.
@@ -52,6 +57,9 @@ func (self Buffer) set3f(param int32, value1, value2, value3 float32) {
 
 // Renamed, was Bufferfv.
 func (self Buffer) setfv(param int32, values []float32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walBufferfv(C.ALuint(self), C.ALenum(param), unsafe.Pointer(&values[0]))
 }
 
@@ -67,6 +75,9 @@ func (self Buffer) set3i(param int32, value1, value2, value3 int32) {
 
 // Renamed, was Bufferiv.
 func (self Buffer) setiv(param int32, values []int32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walBufferiv(C.ALuint(self), C.ALenum(param), unsafe.Pointer(&values[0]))
 }
 
@@ -86,6 +97,9 @@ func (self Buffer) get3f(param int32) (value1, value2, value3 float32) {
 
 // Renamed, was GetBufferfv.
 func (self Buffer) getfv(param int32, values []float32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walGetBufferfv(C.ALuint(self), C.ALenum(param), unsafe.Pointer(&values[0]))
 	return
 }
@@ -106,6 +120,9 @@ func (self Buffer) get3i(param int32) (value1, value2, value3 int32) {
 
 // Renamed, was GetBufferiv.
 func (self Buffer) getiv(param int32, values []int32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walGetBufferiv(C.ALuint(self), C.ALenum(param), unsafe.Pointer(&values[0]))
 }
 
@@ -141,31 +158,49 @@ const (
 // in Hz.
 // Renamed, was BufferData.
 func (self Buffer) SetData(format Format, data []byte, frequency int32) {
+	if len(data) == 0 {
+		return
+	}
 	C.alBufferData(C.ALuint(self), C.ALenum(format), unsafe.Pointer(&data[0]),
 		C.ALsizei(len(data)), C.ALsizei(frequency))
 }
 
 func (self Buffer) SetDataInt16(format Format, data []int16, frequency int32) {
+	if len(data) == 0 {
+		return
+	}
 	C.alBufferData(C.ALuint(self), C.ALenum(format), unsafe.Pointer(&data[0]),
 		C.ALsizei(len(data)*2), C.ALsizei(frequency))
 }
 
 func (self Buffer) SetDataMono8(data []byte, frequency int32) {
+	if len(data) == 0 {
+		return
+	}
 	C.alBufferData(C.ALuint(self), C.ALenum(FormatMono8), unsafe.Pointer(&data[0]),
 		C.ALsizei(len(data)), C.ALsizei(frequency))
 }
 
 func (self Buffer) SetDataMono16(data []int16, frequency int32) {
+	if len(data) == 0 {
+		return
+	}
 	C.alBufferData(C.ALuint(self), C.ALenum(FormatMono16), unsafe.Pointer(&data[0]),
 		C.ALsizei(len(data)*2), C.ALsizei(frequency))
 }
 
 func (self Buffer) SetDataStereo8(data [][2]byte, frequency int32) {
+	if len(data) == 0 {
+		return
+	}
 	C.alBufferData(C.ALuint(self), C.ALenum(FormatStereo8), unsafe.Pointer(&data[0]),
 		C.ALsizei(len(data)*2), C.ALsizei(frequency))
 }
 
 func (self Buffer) SetDataStereo16(data [][2]int16, frequency int32) {
+	if len(data) == 0 {
+		return
+	}
 	C.alBufferData(C.ALuint(self), C.ALenum(FormatStereo16), unsafe.Pointer(&data[0]),
 		C.ALsizei(len(data)*4), C.ALsizei(frequency))
 }
@@ -179,7 +214,7 @@ func NewBuffer() Buffer {
 // Delete() deletes a single buffer.
 // Convenience function, see DeleteBuffers().
 func (self Buffer) Delete() {
-	C.walDeleteSource(C.ALuint(self))
+	C.walDeleteBuffer(C.ALuint(self))
 }
 
 // GetFrequency() returns the frequency, in Hz, of the buffer's sample data.

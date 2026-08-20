@@ -79,6 +79,9 @@ type Sources []Source
 // NewSources() creates n sources.
 // Renamed, was GenSources.
 func NewSources(n int) (sources Sources) {
+	if n <= 0 {
+		return Sources{}
+	}
 	sources = make(Sources, n)
 	C.walGenSources(C.ALsizei(n), unsafe.Pointer(&sources[0]))
 	return
@@ -86,27 +89,42 @@ func NewSources(n int) (sources Sources) {
 
 // Delete deletes the sources.
 func (self Sources) Delete() {
+	if len(self) == 0 {
+		return
+	}
 	n := len(self)
 	C.walDeleteSources(C.ALsizei(n), unsafe.Pointer(&self[0]))
 }
 
 // Renamed, was SourcePlayv.
 func (self Sources) Play() {
+	if len(self) == 0 {
+		return
+	}
 	C.walSourcePlayv(C.ALsizei(len(self)), unsafe.Pointer(&self[0]))
 }
 
 // Renamed, was SourceStopv.
 func (self Sources) Stop() {
+	if len(self) == 0 {
+		return
+	}
 	C.walSourceStopv(C.ALsizei(len(self)), unsafe.Pointer(&self[0]))
 }
 
 // Renamed, was SourceRewindv.
 func (self Sources) Rewind() {
+	if len(self) == 0 {
+		return
+	}
 	C.walSourceRewindv(C.ALsizei(len(self)), unsafe.Pointer(&self[0]))
 }
 
 // Renamed, was SourcePausev.
 func (self Sources) Pause() {
+	if len(self) == 0 {
+		return
+	}
 	C.walSourcePausev(C.ALsizei(len(self)), unsafe.Pointer(&self[0]))
 }
 
@@ -122,6 +140,9 @@ func (self Source) Set3f(param int32, value1, value2, value3 float32) {
 
 // Renamed, was Sourcefv.
 func (self Source) Setfv(param int32, values []float32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walSourcefv(C.ALuint(self), C.ALenum(param), unsafe.Pointer(&values[0]))
 }
 
@@ -137,6 +158,9 @@ func (self Source) Set3i(param int32, value1, value2, value3 int32) {
 
 // Renamed, was Sourceiv.
 func (self Source) Setiv(param int32, values []int32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walSourceiv(C.ALuint(self), C.ALenum(param), unsafe.Pointer(&values[0]))
 }
 
@@ -154,6 +178,9 @@ func (self Source) Get3f(param int32) (v1, v2, v3 float32) {
 
 // Renamed, was GetSourcefv.
 func (self Source) Getfv(param int32, values []float32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walGetSourcefv(C.ALuint(self), C.ALenum(param), unsafe.Pointer(&values[0]))
 }
 
@@ -171,6 +198,9 @@ func (self Source) Get3i(param int32) (v1, v2, v3 int32) {
 
 // Renamed, was GetSourceiv.
 func (self Source) Getiv(param int32, values []int32) {
+	if len(values) == 0 {
+		return
+	}
 	C.walGetSourceiv(C.ALuint(self), C.ALenum(param), unsafe.Pointer(&values[0]))
 }
 
@@ -202,11 +232,17 @@ func (self Source) Pause() {
 
 // Renamed, was SourceQueueBuffers.
 func (self Source) QueueBuffers(buffers Buffers) {
+	if len(buffers) == 0 {
+		return
+	}
 	C.walSourceQueueBuffers(C.ALuint(self), C.ALsizei(len(buffers)), unsafe.Pointer(&buffers[0]))
 }
 
 // Renamed, was SourceUnqueueBuffers.
 func (self Source) UnqueueBuffers(buffers Buffers) {
+	if len(buffers) == 0 {
+		return
+	}
 	C.walSourceUnqueueBuffers(C.ALuint(self), C.ALsizei(len(buffers)), unsafe.Pointer(&buffers[0]))
 }
 
