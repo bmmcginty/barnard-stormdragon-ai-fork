@@ -57,14 +57,30 @@ func New(directory string, format string, now time.Time, frameSize int, interval
 	if err := os.MkdirAll(directory, 0755); err != nil {
 		return nil, err
 	}
-	path := UniquePath(directory, now, format)
-	args := ffmpegArgs(format, path)
-	cmd := exec.Command("ffmpeg", args...)
-	stdin, err := cmd.StdinPipe()
+	output, path, err := reserveOutput(directory, now, format)
 	if err != nil {
 		return nil, err
 	}
+	args := ffmpegArgs(format)
+	cmd := exec.Command("ffmpeg", args...)
+	// Pass the reserved file descriptor directly to ffmpeg. The file is never
+	// reopened by pathname, preventing replacement between reservation and use.
+	cmd.ExtraFiles = []*os.File{output}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		_ = output.Close()
+		_ = os.Remove(path)
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
+		_ = output.Close()
+		_ = os.Remove(path)
+		return nil, err
+	}
+	if err := output.Close(); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		_ = os.Remove(path)
 		return nil, err
 	}
 	recorder := &Recorder{
@@ -91,6 +107,33 @@ func NormalizeFormat(format string) string {
 	return format
 }
 
+func reserveOutput(directory string, now time.Time, format string) (*os.File, string, error) {
+	for {
+		path := UniquePath(directory, now, format)
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if os.IsExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, "", err
+		}
+		return file, path, nil
+	}
+}
+
+// reservePath remains available for callers that only need to reserve a name.
+func reservePath(directory string, now time.Time, format string) (string, error) {
+	file, path, err := reserveOutput(directory, now, format)
+	if err != nil {
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
 func UniquePath(directory string, now time.Time, format string) string {
 	base := fmt.Sprintf("barnard-recording-%s", now.Format("20060102-150405"))
 	path := filepath.Join(directory, base+"."+format)
@@ -109,14 +152,14 @@ func (r *Recorder) Path() string {
 	return r.path
 }
 
-func (r *Recorder) RecordAudioFrame(source uint32, samples []int16) {
+func (r *Recorder) RecordAudioFrame(source uint32, samples []int16, stereo bool) {
 	if r == nil || len(samples) == 0 {
 		return
 	}
 	if len(r.input) >= cap(r.input) {
 		return
 	}
-	frame := NormalizeStereoFrame(samples, r.frameSize)
+	frame := NormalizeStereoFrame(samples, stereo)
 	select {
 	case r.input <- sourceFrame{source: source, samples: frame}:
 	default:
@@ -128,10 +171,9 @@ func (r *Recorder) Stop() error {
 		return nil
 	}
 	r.once.Do(func() {
+		// run owns stdin and closes it only after it has stopped writing.
+		// Closing it here races writePCM and turns a normal stop into EPIPE.
 		close(r.stop)
-		if r.stdin != nil {
-			r.stdin.Close()
-		}
 	})
 	select {
 	case <-r.done:
@@ -150,31 +192,35 @@ func (r *Recorder) run() {
 	defer close(r.done)
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
-	queues := make(map[uint32][][]int16)
-	frame := make([]int16, r.frameSize*gumble.AudioChannels)
+	// Per-source accumulated stereo samples. Incoming frames of any size are
+	// appended and then consumed in frameSize*AudioChannels chunks each tick.
+	queues := make(map[uint32][]int16)
+	chunkSize := r.frameSize * gumble.AudioChannels
+	chunk := make([]int16, chunkSize)
 	for {
 		select {
 		case <-r.stop:
 			r.closeEncoder()
 			return
 		case item := <-r.input:
-			queues[item.source] = append(queues[item.source], item.samples)
+			queues[item.source] = append(queues[item.source], item.samples...)
 		case <-ticker.C:
-			clear(frame)
-			for source, queue := range queues {
-				if len(queue) == 0 {
+			clear(chunk)
+			for source, buffer := range queues {
+				if len(buffer) == 0 {
 					delete(queues, source)
 					continue
 				}
-				mix(frame, queue[0])
-				queue = queue[1:]
-				if len(queue) == 0 {
+				// Mix one chunk worth of samples from this source.
+				if len(buffer) <= chunkSize {
+					mix(chunk, buffer)
 					delete(queues, source)
 				} else {
-					queues[source] = queue
+					mix(chunk, buffer[:chunkSize])
+					queues[source] = buffer[chunkSize:]
 				}
 			}
-			if err := writePCM(r.stdin, frame); err != nil {
+			if err := writePCM(r.stdin, chunk); err != nil {
 				r.setError(err)
 				r.closeEncoder()
 				return
@@ -206,19 +252,19 @@ func (r *Recorder) setError(err error) {
 	}
 }
 
-func NormalizeStereoFrame(samples []int16, frameSize int) []int16 {
-	out := make([]int16, frameSize*gumble.AudioChannels)
-	if len(samples) >= frameSize*gumble.AudioChannels && len(samples)%gumble.AudioChannels == 0 {
-		copy(out, samples[:frameSize*gumble.AudioChannels])
-		return out
+// NormalizeStereoFrame ensures samples are in stereo interleaved format.
+// If stereo is true the samples are returned as-is (already interleaved).
+// Mono input is duplicated to both channels. The returned slice preserves
+// all input audio without truncation.
+func NormalizeStereoFrame(samples []int16, stereo bool) []int16 {
+	if stereo {
+		return samples
 	}
-	limit := frameSize
-	if len(samples) < limit {
-		limit = len(samples)
-	}
-	for i := 0; i < limit; i++ {
-		out[i*2] = samples[i]
-		out[i*2+1] = samples[i]
+	// Convert mono to stereo by duplicating each sample.
+	out := make([]int16, len(samples)*gumble.AudioChannels)
+	for i, s := range samples {
+		out[i*2] = s
+		out[i*2+1] = s
 	}
 	return out
 }
@@ -248,7 +294,7 @@ func writePCM(w io.Writer, samples []int16) error {
 	return err
 }
 
-func ffmpegArgs(format string, path string) []string {
+func ffmpegArgs(format string) []string {
 	args := []string{
 		"-loglevel", "error",
 		"-f", "s16le",
@@ -259,5 +305,5 @@ func ffmpegArgs(format string, path string) []string {
 	if format == FormatOpus {
 		args = append(args, "-c:a", "libopus")
 	}
-	return append(args, "-y", path)
+	return append(args, "-f", format, "pipe:3")
 }

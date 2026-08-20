@@ -26,7 +26,7 @@ type FilePlayer interface {
 }
 
 type Recorder interface {
-	RecordAudioFrame(source uint32, samples []int16)
+	RecordAudioFrame(source uint32, samples []int16, stereo bool)
 }
 
 const recorderOutgoingSource uint32 = ^uint32(0)
@@ -351,7 +351,7 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 				}
 			}
 			if recorder != nil && recordPtr > 0 {
-				recorder.RecordAudioFrame(e.User.Session, recordBuffer[:recordPtr])
+				recorder.RecordAudioFrame(e.User.Session, recordBuffer[:recordPtr], true)
 			}
 
 			reclaim()
@@ -500,13 +500,13 @@ func (s *Stream) sourceRoutine(inputDevice *string) {
 				// Send stereo buffer when file is playing
 				outgoing <- gumble.AudioBuffer(outputBuffer)
 				if recorder := s.getRecorder(); recorder != nil {
-					recorder.RecordAudioFrame(recorderOutgoingSource, outputBuffer)
+					recorder.RecordAudioFrame(recorderOutgoingSource, outputBuffer, true)
 				}
 			} else if hasMicInput {
 				// Send mic when no file is playing
 				outgoing <- gumble.AudioBuffer(int16Buffer)
 				if recorder := s.getRecorder(); recorder != nil {
-					recorder.RecordAudioFrame(recorderOutgoingSource, int16Buffer)
+					recorder.RecordAudioFrame(recorderOutgoingSource, int16Buffer, false)
 				}
 			}
 		}
