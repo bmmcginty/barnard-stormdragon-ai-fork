@@ -3,17 +3,14 @@ package main
 import _ "net/http/pprof"
 import (
 	"al.essio.dev/pkg/shellescape"
-	"bufio"
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	barnlog "git.stormux.org/storm/barnard/log"
@@ -73,32 +70,6 @@ func setup_notify_runner(notify_command string) chan []string {
 		} //for
 	}(t, notify_command, do_nothing)
 	return t
-}
-
-func setup_fifo(fn string) (chan string, error) {
-	t := make(chan string)
-	if fn == "" {
-		return t, nil
-	}
-	os.Remove(fn)
-	err := syscall.Mkfifo(fn, 0600)
-	if err != nil {
-		return t, err
-	}
-	file, err := os.OpenFile(fn, os.O_RDWR, os.ModeNamedPipe)
-	if err != nil {
-		return t, err
-	}
-	go func(fh io.Reader, out chan string) {
-		reader := bufio.NewReader(fh)
-		for {
-			line, err := reader.ReadBytes('\n')
-			if err == nil {
-				out <- strings.TrimSpace(string(line))
-			}
-		}
-	}(file, t)
-	return t, nil
 }
 
 func main() {
