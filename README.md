@@ -40,6 +40,20 @@ noisesuppressionenabled = true
 
 RNNoise is a required build and runtime dependency.
 
+## Automatic Gain Control
+
+Barnard normalizes the level of your outgoing microphone audio with automatic gain control (AGC), which boosts quiet speech and compresses loud peaks. AGC is enabled by default.
+
+### Controls
+- **F12 key**: Toggle AGC on/off (configurable hotkey)
+- **FIFO command**: Send `agc` command to toggle during runtime
+- **Configuration**: Set `agcenabled` in `~/.barnard.toml`
+
+### Configuration Example
+```toml
+agcenabled = true
+```
+
 ## FIFO Control
 
 If you pass the --fifo option to Barnard, a FIFO pipe will be created.
@@ -54,6 +68,7 @@ Current Commands:
 * toggle: Toggle your transmission state.
 * talk: Synonym for toggle.
 * noise: Toggle noise suppression on/off for microphone input.
+* agc: Toggle automatic gain control on/off for microphone input.
 * record: Toggle recording. You may also use `record start` or `record stop`.
 * exit: Exit Barnard, just like when you press your quit key.
 
@@ -140,6 +155,35 @@ If you modify the config file while Barnard is running, your changes may be over
 You can set username and defaultserver in your config file, and they will be used if none is specified when launching barnard.
 (Note that the default username (an empty string) and the default server name (localhost:64738) have been the defaults for barnard up to this  point, and have been left that way for compatibility.)
 
+## Audio Packet Duration
+
+Barnard sends 10 ms audio packets by default. On a slow or unstable connection,
+using larger packets can reduce packet overhead and make short dropouts less
+noticeable, at the cost of additional voice latency. Start Barnard with one of
+the supported durations:
+
+```sh
+barnard --audio-interval 20
+```
+
+Supported values are `10`, `20`, `40`, and `60` milliseconds. Try `20` ms
+first; use `40` ms only if the connection remains unreliable.
+
+## Incoming Audio Jitter Buffer
+
+Barnard holds 40 ms of audio separately for each speaker before starting
+playback. This prevents brief delayed UDP packets from draining OpenAL's audio
+queue, which otherwise produces clicks or pops. To adjust this tradeoff between
+resilience and added incoming latency:
+
+```sh
+barnard --jitter-buffer 60
+```
+
+Supported values are `0`, `20`, `40` (default), and `60` milliseconds. Try
+`60` ms for a lossy or jittery connection. Use `0` only when minimizing latency
+is more important than avoiding playback underruns.
+
 ## Audio Devices
 
 You can set the default input and output devices in the config file as well.
@@ -149,7 +193,7 @@ To clear your inputdevice or outputdevice options and set them to defaults, set 
 
 ### Audio Backends (ALSA, PipeWire, PulseAudio)
 
-Barnard uses OpenAL Soft for audio. By default it will pick the first available backend (often ALSA), but you can force a specific driver:
+Barnard uses OpenAL Soft for audio. The default backend order is determined by the installed OpenAL Soft build and its configuration; it is not guaranteed to prefer PipeWire or PulseAudio. You can force a specific driver:
 
 - Command line: `./barnard --audio-driver pipewire` (or `pulse`, `alsa`, `jack`)
 - Config file: add `audiodriver = "pipewire"` to your `~/.barnard.toml`
@@ -157,7 +201,7 @@ Barnard uses OpenAL Soft for audio. By default it will pick the first available 
 
 If PipeWire or PulseAudio support is missing, install OpenAL Soft with the corresponding backend enabled (e.g., `libopenal1` or `openal-soft` packages built with PipeWire). After changing drivers, rerun with `--list_devices` to confirm the desired devices appear.
 
-Leaving `audiodriver` empty in the config keeps the OpenAL default ordering (PipeWire/Pulse first if available, then ALSA).
+Leaving `audiodriver` empty uses the OpenAL Soft default ordering from the installed library.
 
 ## Keystrokes
 
@@ -249,6 +293,7 @@ After running the command above, `barnard` will be compiled as `$(go env GOPATH)
 
 - <kbd>F1</kbd>: toggle voice transmission
 - <kbd>F9</kbd>: toggle noise suppression
+- <kbd>F12</kbd>: toggle automatic gain control
 - <kbd>F11</kbd>: open actions menu for the focused tree item
 - <kbd>Ctrl+R</kbd>: toggle recording
 - <kbd>Ctrl+L</kbd>: clear chat log
