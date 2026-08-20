@@ -25,6 +25,9 @@ type Config struct {
 	AudioInterval time.Duration
 	// AudioDataBytes is the number of bytes that an audio frame can use.
 	AudioDataBytes int
+	// IncomingAudioBuffer is the amount of per-speaker audio retained before
+	// playback starts, absorbing jitter in incoming UDP packet delivery.
+	IncomingAudioBuffer time.Duration
 
 	// DisableUDP forces all audio to use the TCP tunnel instead of UDP.
 	DisableUDP bool
@@ -38,9 +41,10 @@ type Config struct {
 // NewConfig returns a new Config struct with default values set.
 func NewConfig() *Config {
 	return &Config{
-		Buffers:        8,
-		AudioInterval:  AudioDefaultInterval,
-		AudioDataBytes: AudioDefaultDataBytes,
+		Buffers:             8,
+		AudioInterval:       AudioDefaultInterval,
+		AudioDataBytes:      AudioDefaultDataBytes,
+		IncomingAudioBuffer: 40 * time.Millisecond,
 	}
 }
 
@@ -53,6 +57,9 @@ func (c *Config) Validate() error {
 	}
 	if c.AudioDataBytes <= 0 {
 		return fmt.Errorf("gumble: AudioDataBytes must be positive")
+	}
+	if c.IncomingAudioBuffer < 0 {
+		return fmt.Errorf("gumble: IncomingAudioBuffer must not be negative")
 	}
 	if c.Buffers <= 0 {
 		return fmt.Errorf("gumble: Buffers must be positive")

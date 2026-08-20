@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	barnlog "git.stormux.org/storm/barnard/log"
 
@@ -114,6 +115,7 @@ func main() {
 	serverSet := false
 	usernameSet := false
 	buffers := flag.Int("buffers", 16, "number of audio buffers to use")
+	jitterBuffer := flag.Int("jitter-buffer", 40, "incoming per-user audio buffer in ms (0, 20, 40, or 60)")
 	profile := flag.Bool("profile", false, "add http server to serve profiles")
 	noiseSuppressionEnabled := flag.Bool("noise-suppression", false, "enable noise suppression for microphone input")
 	tcpOnly := flag.Bool("tcp", false, "disable UDP, force audio through TCP tunnel")
@@ -121,6 +123,10 @@ func main() {
 	logFile := flag.String("logfile", "", "write logs to this file (logging is disabled when omitted)")
 
 	flag.Parse()
+	selectedJitterBuffer, err := jitterBufferDuration(*jitterBuffer)
+	if err != nil {
+		handle_raw_error(err)
+	}
 
 	// Set up logging
 	var level barnlog.Level
@@ -214,6 +220,7 @@ func main() {
 	}
 	b.Config.Buffers = *buffers
 	b.Config.DisableUDP = *tcpOnly
+	b.Config.IncomingAudioBuffer = selectedJitterBuffer
 
 	b.Hotkeys = b.UserConfig.GetHotkeys()
 	b.UserConfig.SaveConfig()
@@ -251,6 +258,18 @@ func main() {
 	b.Ui = uiterm.New(&b)
 	b.Ui.Run(reader)
 	handle_error(&b)
+}
+
+// jitterBufferDuration converts the requested incoming playout delay to a
+// supported duration. Zero starts playback without an initial safety buffer.
+func jitterBufferDuration(milliseconds int) (time.Duration, error) {
+	interval := time.Duration(milliseconds) * time.Millisecond
+	switch interval {
+	case 0, 20 * time.Millisecond, 40 * time.Millisecond, 60 * time.Millisecond:
+		return interval, nil
+	default:
+		return 0, fmt.Errorf("jitter buffer must be 0, 20, 40, or 60 ms, got %d", milliseconds)
+	}
 }
 
 func handle_raw_error(e error) {
