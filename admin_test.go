@@ -65,6 +65,21 @@ func TestPermissionList(t *testing.T) {
 	}
 }
 
+// Regression: negative manual-ban minutes were cast to an unsigned protocol
+// duration, turning a rejected short ban into an extremely long one.
+func TestManualBanDurationRejectsNegativeMinutes(t *testing.T) {
+	if _, err := manualBanDuration("-1"); err == nil {
+		t.Fatal("negative duration was accepted")
+	}
+	if _, err := manualBanDuration("9223372036854775807"); err == nil {
+		t.Fatal("overflowing duration was accepted")
+	}
+	got, err := manualBanDuration("15")
+	if err != nil || got != 15*60*1000000000 {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}
+
 func TestAdminEscapeInputs(t *testing.T) {
 	if !isAdminEscapeKey(uiterm.KeyEsc) {
 		t.Fatal("expected escape key to close admin menu")

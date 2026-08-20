@@ -394,11 +394,16 @@ func (c *Client) handleChannelState(buffer []byte) error {
 			channel.Name = *packet.Name
 		}
 		if packet.Links != nil {
-			channel.Links = make(Channels)
+			// A full replacement must also remove our old reciprocal links.
+			for oldID, old := range channel.Links {
+				delete(old.Links, channel.ID)
+				delete(channel.Links, oldID)
+			}
 			event.Type |= ChannelChangeLinks
 			for _, channelID := range packet.Links {
-				if c := c.Channels[channelID]; c != nil {
-					channel.Links[channelID] = c
+				if linked := c.Channels[channelID]; linked != nil {
+					channel.Links[channelID] = linked
+					linked.Links[channel.ID] = channel
 				}
 			}
 		}
@@ -827,6 +832,9 @@ func (c *Client) handleACL(buffer []byte) error {
 	if packet.Groups != nil {
 		acl.Groups = make([]*ACLGroup, 0, len(packet.Groups))
 		for _, group := range packet.Groups {
+			if group == nil || group.Name == nil {
+				return errInvalidProtobuf
+			}
 			aclGroup := &ACLGroup{
 				Name:         *group.Name,
 				Inherited:    group.GetInherited(),
@@ -1011,6 +1019,9 @@ func (c *Client) handleUserList(buffer []byte) error {
 	}
 
 	for _, user := range packet.Users {
+		if user == nil || user.UserId == nil {
+			return errInvalidProtobuf
+		}
 		registeredUser := &RegisteredUser{
 			UserID: *user.UserId,
 		}
@@ -1171,13 +1182,13 @@ func (c *Client) handleUserStats(buffer []byte) error {
 			if packet.FromServer.Good != nil {
 				stats.FromServer.Good = *packet.FromServer.Good
 			}
-			if packet.FromClient.Late != nil {
+			if packet.FromServer.Late != nil {
 				stats.FromServer.Late = *packet.FromServer.Late
 			}
-			if packet.FromClient.Lost != nil {
+			if packet.FromServer.Lost != nil {
 				stats.FromServer.Lost = *packet.FromServer.Lost
 			}
-			if packet.FromClient.Resync != nil {
+			if packet.FromServer.Resync != nil {
 				stats.FromServer.Resync = *packet.FromServer.Resync
 			}
 		}

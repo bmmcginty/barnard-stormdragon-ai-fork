@@ -167,7 +167,9 @@ func (b *Barnard) AdminItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiter
 	if !ok || admin.action == nil {
 		return
 	}
-	admin.action()
+	if !b.withValidAdminTargets(admin.action) {
+		b.AddOutputLine("Admin: action target is no longer available")
+	}
 	b.UiAdmin.Rebuild()
 	b.Ui.Refresh()
 }
@@ -537,11 +539,35 @@ func (b *Barnard) handleAdminPrompt(text string) bool {
 	}
 	prompt := b.pendingAdminPrompt
 	b.pendingAdminPrompt = nil
-	prompt.action(strings.TrimSpace(text))
+	if !b.withValidAdminTargets(func() { prompt.action(strings.TrimSpace(text)) }) {
+		b.AddOutputLine("Admin: action target is no longer available")
+	}
 	if b.Client != nil && b.Client.Self != nil {
 		b.UpdateInputStatus(fmt.Sprintf("[%s]", b.Client.Self.Channel.Name))
 	}
 	return true
+}
+
+// withValidAdminTargets runs an action only while its selected targets are
+// still members of the current connection. Menu actions can outlive server
+// removal events while a prompt is open.
+func (b *Barnard) withValidAdminTargets(action func()) bool {
+	if b.Client == nil {
+		return false
+	}
+	valid := true
+	b.Client.Do(func() {
+		if u := b.adminTargetUser; u != nil && b.Client.Users[u.Session] != u {
+			valid = false
+		}
+		if ch := b.adminTargetChan; ch != nil && b.Client.Channels[ch.ID] != ch {
+			valid = false
+		}
+		if valid {
+			action()
+		}
+	})
+	return valid
 }
 
 func (b *Barnard) CommandAdmin(ui *uiterm.Ui, cmd string) {
@@ -880,15 +906,31 @@ func (b *Barnard) addManualBan(text string) {
 		b.AddOutputLine("Admin: ban address must be CIDR, for example 192.0.2.1/32")
 		return
 	}
-	minutes, err := strconv.Atoi(parts[1])
+	duration, err := manualBanDuration(parts[1])
 	if err != nil {
-		b.AddOutputLine("Admin: ban minutes must be a number")
+		b.AddOutputLine("Admin: " + err.Error())
 		return
 	}
 	reason := strings.Join(parts[2:], " ")
-	b.adminBanList.Add(ip, network.Mask, reason, time.Duration(minutes)*time.Minute)
+	b.adminBanList.Add(ip, network.Mask, reason, duration)
 	b.Client.Send(b.adminBanList)
 	b.AddOutputLine("Admin: manual ban sent")
+}
+
+// manualBanDuration validates user input before it reaches the unsigned
+// protocol duration field.
+func manualBanDuration(text string) (time.Duration, error) {
+	minutes, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("ban minutes must be a number")
+	}
+	if minutes < 0 {
+		return 0, fmt.Errorf("ban minutes must not be negative")
+	}
+	if minutes > int64((1<<63-1)/time.Minute) {
+		return 0, fmt.Errorf("ban duration is too long")
+	}
+	return time.Duration(minutes) * time.Minute, nil
 }
 
 func (b *Barnard) unbanIndex(index int) {

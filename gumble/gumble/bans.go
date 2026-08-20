@@ -16,6 +16,9 @@ type BanList []*Ban
 
 // Add creates a new ban list entry with the given parameters.
 func (b *BanList) Add(address net.IP, mask net.IPMask, reason string, duration time.Duration) *Ban {
+	if duration < 0 {
+		duration = 0
+	}
 	ban := &Ban{
 		Address:  address,
 		Mask:     mask,
@@ -66,6 +69,9 @@ func (b *Ban) SetReason(reason string) {
 
 // SetDuration changes the duration of the ban.
 func (b *Ban) SetDuration(duration time.Duration) {
+	if duration < 0 {
+		duration = 0
+	}
 	b.Duration = duration
 }
 
