@@ -9,10 +9,16 @@ import (
 var autoBitrate = &Listener{
 	Connect: func(e *gumble.ConnectEvent) {
 		if e.MaximumBitrate != nil {
-			const safety = 5
+			const (
+				safety  = 5
+				minBytes = 10 // minimum bytes per frame for usable Opus (8 kbps)
+			)
 			interval := e.Client.Config.AudioInterval
 			dataBytes := (*e.MaximumBitrate / (8 * (int(time.Second/interval) + safety))) - 32 - 10
 
+			if dataBytes < minBytes {
+				dataBytes = minBytes
+			}
 			e.Client.Config.AudioDataBytes = dataBytes
 		}
 	},

@@ -11,6 +11,7 @@ import (
 
 	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
 	"git.stormux.org/storm/barnard/gumble/gumble/varint"
+	"git.stormux.org/storm/barnard/log"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -113,12 +114,34 @@ func (c *Client) handleUDPTunnel(buffer []byte) error {
 	}
 
 	// Sequence
-	// TODO: use in jitter buffer
-	_, n = varint.Decode(buffer)
+	seq, n := varint.Decode(buffer)
 	if n <= 0 {
 		return errInvalidProtobuf
 	}
 	buffer = buffer[n:]
+
+	// Detect sequence gaps (packet loss). Use Opus Packet Loss
+	// Concealment to fill gaps rather than resetting the decoder,
+	// which would cause audible glitches.
+	if user.audioSequenceValid {
+		gap := seq - user.audioSequence
+		if gap > 1 && gap < 100 {
+			log.Info("audio seq gap for %s: %d -> %d (loss=%d), generating PLC",
+				user.Name, user.audioSequence, seq, gap-1)
+			for i := int64(1); i < gap; i++ {
+				c.dispatchPLC(user, audioTarget, decoder)
+			}
+		} else if gap < 0 && gap > -100 {
+			log.Info("audio seq reorder for %s: %d -> %d, resetting decoder",
+				user.Name, user.audioSequence, seq)
+			decoder.Reset()
+		} else if gap == 0 {
+			log.Info("audio seq duplicate for %s: seq=%d", user.Name, seq)
+			return nil
+		}
+	}
+	user.audioSequence = seq
+	user.audioSequenceValid = true
 
 	// Length
 	length, n := varint.Decode(buffer)
@@ -128,12 +151,17 @@ func (c *Client) handleUDPTunnel(buffer []byte) error {
 	buffer = buffer[n:]
 	// Opus audio packets set the 13th bit in the size field as the terminator.
 	audioLength := int(length) &^ 0x2000
+	isFinal := (length & 0x2000) != 0
 	if audioLength > len(buffer) {
 		return errInvalidProtobuf
 	}
 
 	pcm, err := decoder.Decode(buffer[:audioLength], AudioMaximumFrameSize)
 	if err != nil {
+		// Decode failure indicates corrupted decoder state; reset and drop.
+		log.Warn("handleUDPTunnel: Opus decode FAILED for %s seq=%d: %v",
+			user.Name, seq, err)
+		decoder.Reset()
 		return err
 	}
 
@@ -143,6 +171,7 @@ func (c *Client) handleUDPTunnel(buffer []byte) error {
 		Target: &VoiceTarget{
 			ID: uint32(audioTarget),
 		},
+		Sequence:    seq,
 		AudioBuffer: AudioBuffer(pcm),
 	}
 
@@ -157,7 +186,37 @@ func (c *Client) handleUDPTunnel(buffer []byte) error {
 	}
 
 	c.dispatchAudio(user, &event)
+	if isFinal {
+		decoder.Reset()
+		user.audioSequenceValid = false
+		c.dispatchAudio(user, &AudioPacket{Client: c, Sender: user, Terminator: true})
+	}
 	return nil
+}
+
+// dispatchPLC generates a Packet Loss Concealment frame from the decoder
+// and dispatches it to all audio listeners for the given user.
+// seq is the expected sequence number for the concealed frame.
+func (c *Client) dispatchPLC(user *User, audioTarget byte, decoder AudioDecoder) {
+	// Feed empty data to the decoder to trigger Opus PLC, which
+	// produces a concealed frame bridging the gap.
+	pcm, err := decoder.Decode(nil, AudioMaximumFrameSize)
+	if err != nil {
+		// If PLC fails, reset the decoder so the next real packet
+		// starts from a clean state.
+		decoder.Reset()
+		return
+	}
+	seq := user.audioSequence + 1
+	user.audioSequence = seq
+	event := AudioPacket{
+		Client:      c,
+		Sender:      user,
+		Target:      &VoiceTarget{ID: uint32(audioTarget)},
+		Sequence:    seq,
+		AudioBuffer: AudioBuffer(pcm),
+	}
+	c.dispatchAudio(user, &event)
 }
 
 // dispatchAudio sends an audio packet to all registered audio listeners.

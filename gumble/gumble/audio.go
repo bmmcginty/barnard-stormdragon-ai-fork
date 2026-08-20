@@ -53,29 +53,29 @@ type AudioStreamEvent struct {
 type AudioBuffer []int16
 
 func (a AudioBuffer) writeAudio(client *Client, seq int64, final bool) error {
-	// Choose encoder based on whether buffer size indicates stereo or mono
+	// Encoding shares mutable codec state with server-configuration and file
+	// playback changes. Keep the client read lock through Encode and Reset so a
+	// stereo encoder cannot be replaced or reset while it is in use.
+	client.volatile.RLock()
 	encoder := client.AudioEncoder
-	frameSize := client.Config.AudioFrameSize()
-	if len(a) == frameSize*AudioChannels && client.AudioEncoderStereo != nil {
-		encoder = client.AudioEncoderStereo
-	} else if client.IsStereoEncoderEnabled() && client.AudioEncoderStereo != nil {
+	if client.useStereoEncoder && client.AudioEncoderStereo != nil {
 		encoder = client.AudioEncoderStereo
 	}
 	if encoder == nil {
+		client.volatile.RUnlock()
 		return nil
 	}
-	dataBytes := client.Config.AudioDataBytes
-	raw, err := encoder.Encode(a, len(a), dataBytes)
+	raw, err := encoder.Encode(a, len(a), client.Config.AudioDataBytes)
 	if final {
-		defer encoder.Reset()
+		encoder.Reset()
 	}
-	if err != nil {
-		return err
-	}
-
 	var targetID byte
 	if target := client.VoiceTarget; target != nil {
 		targetID = byte(target.ID)
+	}
+	client.volatile.RUnlock()
+	if err != nil {
+		return err
 	}
 	return client.Conn.WriteAudio(byte(4), targetID, seq, final, raw, nil, nil, nil)
 }
@@ -86,8 +86,17 @@ type AudioPacket struct {
 	Sender *User
 	Target *VoiceTarget
 
+	// Sequence is the UDP audio frame timestamp, used by the jitter buffer to
+	// reorder packets.
+	Sequence int64
+
 	AudioBuffer
 
-	HasPosition bool
-	X, Y, Z     float32
+	// Terminator marks the final packet in a talk burst. Audio listeners use
+	// it to discard ordering state before the sender starts a new burst.
+	Terminator bool
+
+	HasPosition      bool
+	X, Y, Z          float32
+	VolumeAdjustment float32
 }

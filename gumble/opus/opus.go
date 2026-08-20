@@ -29,9 +29,9 @@ func (*generator) ID() int {
 func (*generator) NewEncoder() gumble.AudioEncoder {
 	// Force mono for voice transmission
 	e, _ := opus.NewEncoder(gumble.AudioSampleRate, VoiceChannels, opus.AppVoIP)
-	_ = e.SetBitrateToMax()
 	return &Encoder{
-		e,
+		Encoder:  e,
+		channels: VoiceChannels,
 	}
 }
 
@@ -39,9 +39,9 @@ func (*generator) NewEncoder() gumble.AudioEncoder {
 func NewStereoEncoder() gumble.AudioEncoder {
 	// Create stereo encoder for file playback
 	e, _ := opus.NewEncoder(gumble.AudioSampleRate, gumble.AudioChannels, opus.AppAudio)
-	_ = e.SetBitrateToMax()
 	return &Encoder{
-		e,
+		Encoder:  e,
+		channels: gumble.AudioChannels,
 	}
 }
 
@@ -58,19 +58,34 @@ func (*generator) NewDecoder() gumble.AudioDecoder {
 // encoder
 type Encoder struct {
 	*opus.Encoder
+	channels int
 }
 
 func (*Encoder) ID() int {
 	return ID
 }
 
-func (e *Encoder) Encode(pcm []int16, _, maxDataBytes int) ([]byte, error) {
+func (e *Encoder) Encode(pcm []int16, frameSamples, maxDataBytes int) ([]byte, error) {
+	bitrate := encoderBitrate(maxDataBytes, frameSamples, e.channels)
+	if bitrate < 8000 {
+		bitrate = 8000 // Opus minimum viable bitrate for voice
+	}
+	_ = e.Encoder.SetBitrate(bitrate)
+
 	buf := make([]byte, maxDataBytes)
 	n, err := e.Encoder.Encode(pcm, buf)
 	if err != nil {
 		return []byte{}, err
 	}
 	return buf[:n], nil
+}
+
+// encoderBitrate converts a per-frame packet budget to bits per second.
+func encoderBitrate(maxDataBytes, frameSamples, channels int) int {
+	if frameSamples <= 0 || channels <= 0 {
+		return 8000
+	}
+	return maxDataBytes * 8 * gumble.AudioSampleRate * channels / frameSamples
 }
 
 func (e *Encoder) Reset() {
@@ -89,17 +104,21 @@ func (*Decoder) ID() int {
 }
 
 func (d *Decoder) Decode(data []byte, frameSize int) ([]int16, error) {
-	// Allocate buffer for stereo - frameSize is per channel
-	pcm := make([]int16, frameSize*gumble.AudioChannels)
+	// frameSize is the maximum number of PCM samples (all channels
+	// combined). The underlying Opus decoder output is interleaved
+	// stereo, so the buffer holds left+right pairs.
+	pcm := make([]int16, frameSize)
 
-	// Decode the data
+	// Decode the data. If data is nil/empty, the decoder performs
+	// Packet Loss Concealment and produces a concealed frame.
 	n, err := d.Decoder.Decode(data, pcm)
 	if err != nil {
 		return []int16{}, err
 	}
 
-	// Return the exact number of samples decoded
-	return pcm[:n*gumble.AudioChannels], nil
+	// n is the number of samples per channel; stereo interleaved
+	// output means total samples = n * channels.
+	return pcm[:n*d.channels], nil
 }
 
 func (d *Decoder) Reset() {
