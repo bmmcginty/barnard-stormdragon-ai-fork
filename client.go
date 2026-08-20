@@ -51,6 +51,7 @@ func (b *Barnard) connect(reconnect bool) bool {
 		return false
 	}
 	b.Stream = stream
+	b.Stream.SetMicVolume(b.UserConfig.GetMicVolume(), false)
 	b.Stream.AttachStream(b.Client)
 	b.Stream.SetNoiseProcessor(b.NoiseSuppressor)
 	b.Stream.SetAGCEnabled(b.UserConfig.GetAGCEnabled())

@@ -338,11 +338,17 @@ func (b *Barnard) setTransmit(ui *uiterm.Ui, val int) {
 func (b *Barnard) OnMicVolumeDown(ui *uiterm.Ui, key uiterm.Key) {
 	b.Stream.SetMicVolume(-0.1, true)
 	b.UserConfig.SetMicVolume(b.Stream.GetMicVolume())
+	if err := b.UserConfig.SaveConfig(); err != nil {
+		b.AddOutputLine("Microphone: could not save volume: " + err.Error())
+	}
 }
 
 func (b *Barnard) OnMicVolumeUp(ui *uiterm.Ui, key uiterm.Key) {
 	b.Stream.SetMicVolume(0.1, true)
 	b.UserConfig.SetMicVolume(b.Stream.GetMicVolume())
+	if err := b.UserConfig.SaveConfig(); err != nil {
+		b.AddOutputLine("Microphone: could not save volume: " + err.Error())
+	}
 }
 
 func (b *Barnard) OnQuitPress(ui *uiterm.Ui, key uiterm.Key) {

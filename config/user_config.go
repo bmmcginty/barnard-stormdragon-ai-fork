@@ -316,6 +316,15 @@ func (c *Config) SetMicVolume(v float32) {
 	c.config.MicVolume = &t
 }
 
+func (c *Config) GetMicVolume() float32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.config.MicVolume == nil {
+		return 1.0
+	}
+	return *c.config.MicVolume
+}
+
 func (c *Config) GetHotkeys() *Hotkeys {
 	return c.config.Hotkeys
 }

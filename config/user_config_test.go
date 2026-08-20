@@ -115,6 +115,18 @@ func TestMakeHostPortHandlesIPv6AndMalformedAddress(t *testing.T) {
 		t.Fatalf("got %q:%d", host, port)
 	}
 }
+
+// Regression: a stored zero mic volume was treated as an uninitialized value,
+// so a persisted mute became full volume after reconnecting.
+func TestMicVolumeAllowsPersistedMute(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "barnard.toml")
+	cfg := NewConfig(&path)
+	cfg.SetMicVolume(0)
+	if got := cfg.GetMicVolume(); got != 0 {
+		t.Fatalf("got %v, want mute", got)
+	}
+}
+
 func TestConfigUsesHomeEnvironmentForDefaultPath(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
