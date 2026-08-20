@@ -63,7 +63,9 @@ func (b *Barnard) changeVolume(users []*gumble.User, change float32) {
 		}
 		b.UserConfig.UpdateConfig(u)
 	}
-	b.UserConfig.SaveConfig()
+	if err := b.UserConfig.SaveConfig(); err != nil {
+		b.AddOutputLine("Volume: could not save setting: " + err.Error())
+	}
 }
 
 func (b *Barnard) resetVolume(users []*gumble.User) {
@@ -80,7 +82,9 @@ func (b *Barnard) resetVolume(users []*gumble.User) {
 		}
 		b.UserConfig.UpdateConfig(u)
 	}
-	b.UserConfig.SaveConfig()
+	if err := b.UserConfig.SaveConfig(); err != nil {
+		b.AddOutputLine("Volume: could not save setting: " + err.Error())
+	}
 }
 
 func makeUsersArray(users gumble.Users) []*gumble.User {

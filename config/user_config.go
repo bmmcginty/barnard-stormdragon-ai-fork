@@ -6,12 +6,16 @@ import (
 	"git.stormux.org/storm/barnard/uiterm"
 	"github.com/pelletier/go-toml/v2"
 	"io/ioutil"
+	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type Config struct {
+	mu     sync.Mutex
 	config *exportableConfig
 	fn     string
 }
@@ -45,20 +49,40 @@ type eUser struct {
 	LocallyMuted bool // Changed from Muted to LocallyMuted to match User struct
 }
 
-func (c *Config) SaveConfig() {
-	var data []byte
+// SaveConfig atomically replaces the persisted configuration. Errors are
+// returned so an unavailable directory cannot crash the client.
+func (c *Config) SaveConfig() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.saveConfigLocked()
+}
+
+func (c *Config) saveConfigLocked() error {
+	if err := os.MkdirAll(filepath.Dir(c.fn), 0700); err != nil {
+		return err
+	}
 	data, err := toml.Marshal(c.config)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	err = ioutil.WriteFile(c.fn+".tmp", data, 0600)
+	file, err := os.CreateTemp(filepath.Dir(c.fn), filepath.Base(c.fn)+".tmp-")
 	if err != nil {
-		panic(err)
+		return err
 	}
-	err = os.Rename(c.fn+".tmp", c.fn)
-	if err != nil {
-		panic(err)
+	tmp := file.Name()
+	defer os.Remove(tmp)
+	if err := file.Chmod(0600); err != nil {
+		file.Close()
+		return err
 	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, c.fn)
 }
 
 func key(k uiterm.Key) *uiterm.Key {
@@ -78,8 +102,11 @@ func (c *Config) LoadConfig() {
 		Exit:                   key(uiterm.KeyF10),
 		ToggleTimestamps:       key(uiterm.KeyF3),
 		SwitchViews:            key(uiterm.KeyTab),
+		ClearOutput:            key(uiterm.KeyCtrlL),
 		ScrollUp:               key(uiterm.KeyPgup),
 		ScrollDown:             key(uiterm.KeyPgdn),
+		ScrollToTop:            key(uiterm.KeyHome),
+		ScrollToBottom:         key(uiterm.KeyEnd),
 		AdminMenu:              key(uiterm.KeyF11),
 		NoiseSuppressionToggle: key(uiterm.KeyF9),
 	}
@@ -156,8 +183,11 @@ func (c *Config) ensureHotkeys() {
 		Exit:                   key(uiterm.KeyF10),
 		ToggleTimestamps:       key(uiterm.KeyF3),
 		SwitchViews:            key(uiterm.KeyTab),
+		ClearOutput:            key(uiterm.KeyCtrlL),
 		ScrollUp:               key(uiterm.KeyPgup),
 		ScrollDown:             key(uiterm.KeyPgdn),
+		ScrollToTop:            key(uiterm.KeyHome),
+		ScrollToBottom:         key(uiterm.KeyEnd),
 		AdminMenu:              key(uiterm.KeyF11),
 		NoiseSuppressionToggle: key(uiterm.KeyF9),
 	}
@@ -189,11 +219,20 @@ func (c *Config) ensureHotkeys() {
 	if hotkeys.SwitchViews == nil {
 		hotkeys.SwitchViews = defaults.SwitchViews
 	}
+	if hotkeys.ClearOutput == nil {
+		hotkeys.ClearOutput = defaults.ClearOutput
+	}
 	if hotkeys.ScrollUp == nil {
 		hotkeys.ScrollUp = defaults.ScrollUp
 	}
 	if hotkeys.ScrollDown == nil {
 		hotkeys.ScrollDown = defaults.ScrollDown
+	}
+	if hotkeys.ScrollToTop == nil {
+		hotkeys.ScrollToTop = defaults.ScrollToTop
+	}
+	if hotkeys.ScrollToBottom == nil {
+		hotkeys.ScrollToBottom = defaults.ScrollToBottom
 	}
 	if hotkeys.AdminMenu == nil {
 		hotkeys.AdminMenu = defaults.AdminMenu
@@ -250,14 +289,18 @@ func (c *Config) findUser(address string, username string) *eUser {
 	return t
 }
 
-func (c *Config) ToggleMute(u *gumble.User) {
+func (c *Config) ToggleMute(u *gumble.User) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	j := c.findUser(u.GetClient().Config.Address, u.Name)
 	j.LocallyMuted = !j.LocallyMuted
 	u.SetLocallyMuted(j.LocallyMuted)
-	c.SaveConfig()
+	return c.saveConfigLocked()
 }
 
 func (c *Config) SetMicVolume(v float32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	t := float32(v)
 	c.config.MicVolume = &t
 }
@@ -298,18 +341,24 @@ func (c *Config) GetCertificate() *string {
 }
 
 func (c *Config) GetNoiseSuppressionEnabled() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.config.NoiseSuppressionEnabled == nil {
 		return false
 	}
 	return *c.config.NoiseSuppressionEnabled
 }
 
-func (c *Config) SetNoiseSuppressionEnabled(enabled bool) {
+func (c *Config) SetNoiseSuppressionEnabled(enabled bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.config.NoiseSuppressionEnabled = &enabled
-	c.SaveConfig()
+	return c.saveConfigLocked()
 }
 
 func (c *Config) GetRecordingFormat() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.config.RecordingFormat == nil {
 		return "flac"
 	}
@@ -317,6 +366,8 @@ func (c *Config) GetRecordingFormat() string {
 }
 
 func (c *Config) GetRecordingDirectory() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.config.RecordingDirectory == nil {
 		return resolvePath("~/Audio")
 	}
@@ -324,6 +375,8 @@ func (c *Config) GetRecordingDirectory() string {
 }
 
 func (c *Config) UpdateUser(u *gumble.User) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	var j *eUser
 	var uc *gumble.Client
 	uc = u.GetClient()
@@ -339,11 +392,27 @@ func (c *Config) UpdateUser(u *gumble.User) {
 }
 
 func (c *Config) UpdateConfig(u *gumble.User) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	var j *eUser
 	j = c.findUser(u.GetClient().Config.Address, u.Name)
 	j.Boost = u.Boost()
 	j.Volume = u.Volume()
 	j.LocallyMuted = u.LocallyMuted() // Save LocallyMuted state to config
+}
+
+// RequireConfigFile verifies that an explicitly requested configuration file
+// exists and is a regular file. The default configuration remains optional.
+func RequireConfigFile(fn string) error {
+	path := resolvePath(fn)
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("config file %q: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("config file %q is not a regular file", path)
+	}
+	return nil
 }
 
 func NewConfig(fn *string) *Config {
@@ -367,7 +436,7 @@ func readFile(path string) []byte {
 
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
+	if err != nil {
 		return false
 	}
 	return !info.IsDir()
@@ -389,11 +458,16 @@ func resolvePath(path string) string {
 }
 
 func makeHostPort(addr string) (string, int) {
-	parts := strings.Split(addr, ":")
-	host := parts[0]
-	port, err := strconv.Atoi(parts[1])
+	// SplitHostPort correctly handles bracketed IPv6. Invalid or portless
+	// addresses stay usable as a host with Mumble's default port instead of
+	// crashing configuration operations.
+	host, portText, err := net.SplitHostPort(addr)
 	if err != nil {
-		panic(err)
+		return strings.Trim(addr, "[]"), 64738
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return host, 64738
 	}
 	return host, port
 }

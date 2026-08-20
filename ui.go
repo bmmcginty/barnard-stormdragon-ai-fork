@@ -99,7 +99,9 @@ func (b *Barnard) OnTimestampToggle(ui *uiterm.Ui, key uiterm.Key) {
 
 func (b *Barnard) OnNoiseSuppressionToggle(ui *uiterm.Ui, key uiterm.Key) {
 	enabled := !b.UserConfig.GetNoiseSuppressionEnabled()
-	b.UserConfig.SetNoiseSuppressionEnabled(enabled)
+	if err := b.UserConfig.SetNoiseSuppressionEnabled(enabled); err != nil {
+		b.AddOutputLine("Noise suppression: could not save setting: " + err.Error())
+	}
 	b.NoiseSuppressor.SetEnabled(enabled)
 
 	if enabled {
@@ -161,7 +163,9 @@ func (b *Barnard) CommandMicDown(ui *uiterm.Ui, cmd string) {
 
 func (b *Barnard) CommandNoiseSuppressionToggle(ui *uiterm.Ui, cmd string) {
 	enabled := !b.UserConfig.GetNoiseSuppressionEnabled()
-	b.UserConfig.SetNoiseSuppressionEnabled(enabled)
+	if err := b.UserConfig.SetNoiseSuppressionEnabled(enabled); err != nil {
+		b.AddOutputLine("Noise suppression: could not save setting: " + err.Error())
+	}
 	b.NoiseSuppressor.SetEnabled(enabled)
 
 	if enabled {

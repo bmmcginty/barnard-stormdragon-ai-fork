@@ -115,10 +115,10 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
 			users := makeUsersArray(treeItem.Channel.Users)
 			for _, u := range users {
 				// Explicitly set user mute state to match channel state
-				if channelWillBeMuted && !u.LocallyMuted() {
-					b.UserConfig.ToggleMute(u)
-				} else if !channelWillBeMuted && u.LocallyMuted() {
-					b.UserConfig.ToggleMute(u)
+				if channelWillBeMuted != u.LocallyMuted() {
+					if err := b.UserConfig.ToggleMute(u); err != nil {
+						b.AddOutputLine("Mute: could not save setting: " + err.Error())
+					}
 				}
 
 				if source := u.AudioSource(); source != nil {
@@ -158,7 +158,9 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
 	if treeItem.User != nil {
 		if key == *b.Hotkeys.MuteToggle {
 			// Toggle mute for single user
-			b.UserConfig.ToggleMute(treeItem.User)
+			if err := b.UserConfig.ToggleMute(treeItem.User); err != nil {
+				b.AddOutputLine("Mute: could not save setting: " + err.Error())
+			}
 			if source := treeItem.User.AudioSource(); source != nil {
 				if treeItem.User.LocallyMuted() {
 					source.SetGain(0)

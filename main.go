@@ -114,6 +114,8 @@ func main() {
 	fifo := flag.String("fifo", "", "path of a FIFO from which to read commands")
 	serverSet := false
 	usernameSet := false
+	configSet := false
+	certificateSet := false
 	buffers := flag.Int("buffers", 16, "number of audio buffers to use")
 	audioInterval := flag.Int("audio-interval", 10, "outgoing audio packet duration in ms (10, 20, 40, or 60)")
 	jitterBuffer := flag.Int("jitter-buffer", 40, "incoming per-user audio buffer in ms (0, 20, 40, or 60)")
@@ -165,19 +167,24 @@ func main() {
 		}()
 	}
 
-	userConfig := config.NewConfig(cfgfn)
-
-	certificateSet := false
 	flag.CommandLine.Visit(func(theFlag *flag.Flag) {
 		switch theFlag.Name {
 		case "server":
 			serverSet = true
 		case "username":
 			usernameSet = true
+		case "config":
+			configSet = true
 		case "certificate":
 			certificateSet = true
 		}
 	})
+	if configSet {
+		if err := config.RequireConfigFile(*cfgfn); err != nil {
+			handle_raw_error(err)
+		}
+	}
+	userConfig := config.NewConfig(cfgfn)
 
 	if !serverSet {
 		server = userConfig.GetDefaultServer()
@@ -229,13 +236,19 @@ func main() {
 	b.Config.IncomingAudioBuffer = selectedJitterBuffer
 
 	b.Hotkeys = b.UserConfig.GetHotkeys()
-	b.UserConfig.SaveConfig()
+	if err := b.UserConfig.SaveConfig(); err != nil {
+		fmt.Fprintf(os.Stderr, "could not save configuration: %s\n", err)
+		os.Exit(1)
+	}
 
 	// Configure noise suppression
 	enabled := b.UserConfig.GetNoiseSuppressionEnabled()
 	if *noiseSuppressionEnabled {
 		enabled = true
-		b.UserConfig.SetNoiseSuppressionEnabled(true)
+		if err := b.UserConfig.SetNoiseSuppressionEnabled(true); err != nil {
+			fmt.Fprintf(os.Stderr, "could not save configuration: %s\n", err)
+			os.Exit(1)
+		}
 	}
 	b.NoiseSuppressor.SetEnabled(enabled)
 
