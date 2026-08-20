@@ -88,6 +88,9 @@ func main() {
 	jitterBuffer := flag.Int("jitter-buffer", 40, "incoming per-user audio buffer in ms (0, 20, 40, or 60)")
 	profile := flag.Bool("profile", false, "add http server to serve profiles")
 	noiseSuppressionEnabled := flag.Bool("noise-suppression", false, "enable noise suppression for microphone input")
+	autoTransmit := flag.Bool("auto-transmit", false, "start transmitting immediately on connect")
+	toneTest := flag.Bool("tone-test", false, "send a 440 Hz test tone instead of microphone (bypasses soundcard)")
+	toneTestOutput := flag.String("tone-out", "incoming.pcm", "file to save incoming audio to in tone-test mode")
 	tcpOnly := flag.Bool("tcp", false, "disable UDP, force audio through TCP tunnel")
 	logLevel := flag.String("log", "warn", "log level: debug, info, warn, error")
 	logFile := flag.String("logfile", "", "write logs to this file (logging is disabled when omitted)")
@@ -194,6 +197,9 @@ func main() {
 		Config:          gumble.NewConfig(),
 		UserConfig:      userConfig,
 		Address:         *server,
+		AutoTransmit:    *autoTransmit,
+		ToneTest:        *toneTest,
+		ToneTestOutput:  *toneTestOutput,
 		MutedChannels:   make(map[uint32]bool),
 		NoiseSuppressor: noise.NewSuppressor(),
 	}

@@ -17,14 +17,25 @@ func (b *Barnard) start() {
 	b.Config.Attach(gumbleutil.AutoBitrate)
 	b.Config.Attach(b)
 	b.Config.Address = b.Address
-	// test Audio
-	_, err := gumbleopenal.New(b.Client, b.UserConfig.GetInputDevice(), b.UserConfig.GetOutputDevice(), true)
-	if err != nil {
-		b.exitWithError(err)
-		return
+
+	if b.ToneTest {
+		// Tone test mode: skip all OpenAL/soundcard initialization.
+		// We just need a network connection — the tone generator and
+		// file saver are set up in connect().
+	} else {
+		// test Audio
+		_, err := gumbleopenal.New(b.Client, b.UserConfig.GetInputDevice(), b.UserConfig.GetOutputDevice(), true)
+		if err != nil {
+			b.exitWithError(err)
+			return
+		}
 	}
 	//connect, not reconnect
 	b.connect(false)
+}
+
+func (b *Barnard) toneTestAutoTransmit() bool {
+	return b.ToneTest && b.AutoTransmit
 }
 
 func (b *Barnard) exitWithError(err error) {
@@ -43,6 +54,31 @@ func (b *Barnard) connect(reconnect bool) bool {
 			b.exitWithError(err)
 		}
 		return false
+	}
+
+	if b.ToneTest {
+		// --- Tone test mode: skip all OpenAL; generate 440 Hz tone
+		// --- and save incoming audio to a file.
+
+		// Open the output first. Starting transmission before this succeeds
+		// leaves an orphaned tone goroutine when the path is unusable.
+		saver, err := NewAudioFileSaver(b.ToneTestOutput)
+		if err != nil {
+			b.exitWithError(err)
+			return false
+		}
+		b.toneTestSaver = saver
+		b.toneTestSaverDetach = b.Client.Config.AttachAudio(saver)
+
+		b.Connected = true
+		if b.toneTestAutoTransmit() {
+			b.toneTestStop = make(chan struct{})
+			go StartToneGenerator(b.Client, b.toneTestStop)
+			b.Tx = true
+			b.UpdateGeneralStatus(" Tx  ", true)
+			b.AddOutputLine("Tone test transmission started")
+		}
+		return true
 	}
 
 	stream, err := gumbleopenal.New(b.Client, b.UserConfig.GetInputDevice(), b.UserConfig.GetOutputDevice(), false)
@@ -71,6 +107,9 @@ func (b *Barnard) connect(reconnect bool) bool {
 	b.FileStreamMutex.Unlock()
 
 	b.Connected = true
+	// Dial delivers OnConnect before connect creates the OpenAL stream, so
+	// start auto-transmit here as well for initial connections and reconnects.
+	b.startAutoTransmit()
 	return true
 }
 
@@ -105,6 +144,21 @@ func (b *Barnard) OnConnect(e *gumble.ConnectEvent) {
 		b.AddOutputLine(fmt.Sprintf("Welcome message: %s", wmsg))
 	}
 	b.Ui.Refresh()
+
+	b.startAutoTransmit()
+}
+
+func (b *Barnard) startAutoTransmit() {
+	if !b.AutoTransmit || b.Tx || b.Stream == nil {
+		return
+	}
+	if err := b.Stream.StartSource(b.UserConfig.GetInputDevice()); err != nil {
+		b.AddOutputLine(fmt.Sprintf("auto-transmit failed: %s", err.Error()))
+		return
+	}
+	b.Tx = true
+	b.UpdateGeneralStatus(" AutoTx ", true)
+	b.AddOutputLine("Auto-transmit started")
 }
 
 func (b *Barnard) OnDisconnect(e *gumble.DisconnectEvent) {
@@ -121,6 +175,16 @@ func (b *Barnard) OnDisconnect(e *gumble.DisconnectEvent) {
 		reason = e.String
 	}
 	b.stopRecordingForDisconnect()
+
+	// Tone test cleanup
+	if b.ToneTest {
+		if b.toneTestStop != nil {
+			close(b.toneTestStop)
+			b.toneTestStop = nil
+		}
+		b.cleanupToneTestAudio()
+	}
+
 	b.Notify("disconnect", "me", reason)
 	if reason == "" {
 		b.AddOutputLine("Disconnected")

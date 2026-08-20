@@ -245,6 +245,10 @@ func (b *Barnard) CommandPlayFile(ui *uiterm.Ui, cmd string) {
 		b.AddOutputLine("Not connected to server")
 		return
 	}
+	if b.ToneTest {
+		b.AddOutputLine("File playback is unavailable in tone test mode")
+		return
+	}
 
 	b.FileStreamMutex.Lock()
 	defer b.FileStreamMutex.Unlock()
@@ -319,7 +323,14 @@ func (b *Barnard) setTransmit(ui *uiterm.Ui, val int) {
 		b.Notify("micdown", "me", "")
 		b.Tx = false
 		b.UpdateGeneralStatus(" Idle ", false)
-		b.Stream.StopSource()
+		if b.ToneTest {
+			if b.toneTestStop != nil {
+				close(b.toneTestStop)
+				b.toneTestStop = nil
+			}
+		} else {
+			b.Stream.StopSource()
+		}
 	} else if b.Connected == false {
 		b.Notify("error", "me", "no tx while disconnected")
 		b.Tx = false
@@ -331,18 +342,28 @@ func (b *Barnard) setTransmit(ui *uiterm.Ui, val int) {
 		b.UpdateGeneralStatus("cannot transmit in muted channel", true)
 	} else {
 		b.Tx = true
-		err := b.Stream.StartSource(b.UserConfig.GetInputDevice())
-		if err != nil {
-			b.Notify("error", "me", err.Error())
-			b.UpdateGeneralStatus(err.Error(), true)
-		} else {
+		if b.ToneTest {
+			b.toneTestStop = make(chan struct{})
+			go StartToneGenerator(b.Client, b.toneTestStop)
 			b.Notify("micup", "me", "")
 			b.UpdateGeneralStatus(" Tx  ", true)
+		} else {
+			err := b.Stream.StartSource(b.UserConfig.GetInputDevice())
+			if err != nil {
+				b.Notify("error", "me", err.Error())
+				b.UpdateGeneralStatus(err.Error(), true)
+			} else {
+				b.Notify("micup", "me", "")
+				b.UpdateGeneralStatus(" Tx  ", true)
+			}
 		}
 	}
 }
 
 func (b *Barnard) OnMicVolumeDown(ui *uiterm.Ui, key uiterm.Key) {
+	if b.ToneTest {
+		return
+	}
 	b.Stream.SetMicVolume(-0.1, true)
 	b.UserConfig.SetMicVolume(b.Stream.GetMicVolume())
 	if err := b.UserConfig.SaveConfig(); err != nil {
@@ -351,6 +372,9 @@ func (b *Barnard) OnMicVolumeDown(ui *uiterm.Ui, key uiterm.Key) {
 }
 
 func (b *Barnard) OnMicVolumeUp(ui *uiterm.Ui, key uiterm.Key) {
+	if b.ToneTest {
+		return
+	}
 	b.Stream.SetMicVolume(0.1, true)
 	b.UserConfig.SetMicVolume(b.Stream.GetMicVolume())
 	if err := b.UserConfig.SaveConfig(); err != nil {

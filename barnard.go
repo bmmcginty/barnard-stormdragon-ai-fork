@@ -27,9 +27,10 @@ type Barnard struct {
 	Address   string
 	TLSConfig tls.Config
 
-	Stream    *gumbleopenal.Stream
-	Tx        bool
-	Connected bool
+	Stream       *gumbleopenal.Stream
+	Tx           bool
+	AutoTransmit bool // auto-start transmission on connect
+	Connected    bool
 
 	Ui              *uiterm.Ui
 	UiOutput        uiterm.Textview
@@ -62,6 +63,13 @@ type Barnard struct {
 	FileStream      *fileplayback.Player
 	FileStreamMutex sync.Mutex
 
+	// Added for tone test mode (bypasses all soundcard/OpenAL)
+	ToneTest            bool
+	ToneTestOutput      string
+	toneTestStop        chan struct{}
+	toneTestSaver       *AudioFileSaver
+	toneTestSaverDetach gumble.Detacher
+
 	// Added for recording
 	RecordingMutex    sync.Mutex
 	Recorder          *recording.Recorder
@@ -72,6 +80,17 @@ type Barnard struct {
 	adminBanList       gumble.BanList
 	adminUserList      gumble.RegisteredUsers
 	adminACL           *gumble.ACL
+}
+
+func (b *Barnard) cleanupToneTestAudio() {
+	if b.toneTestSaverDetach != nil {
+		b.toneTestSaverDetach.Detach()
+		b.toneTestSaverDetach = nil
+	}
+	if b.toneTestSaver != nil {
+		b.toneTestSaver.Stop()
+		b.toneTestSaver = nil
+	}
 }
 
 func (b *Barnard) StopTransmission() {
