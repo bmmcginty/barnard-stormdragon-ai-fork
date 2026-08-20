@@ -74,19 +74,43 @@ func (c *Client) handleVersion(buffer []byte) error {
 	if err := proto.Unmarshal(buffer, &packet); err != nil {
 		return err
 	}
+	// Mumble 1.5 introduced protobuf UDP audio. Older servers retain the
+	// legacy UDP payload inside the same encrypted envelope.
+	if packet.VersionV1 != nil {
+		c.udpMu.Lock()
+		c.udpProtobuf = *packet.VersionV1 >= ClientVersion
+		c.udpMu.Unlock()
+	}
 	return nil
 }
 
 func (c *Client) handleUDPTunnel(buffer []byte) error {
+	// Native UDP and TCP tunnel packets can arrive concurrently. Keep the user
+	// map and its decoder/sequence state stable for the entire decode.
+	c.volatile.RLock()
+	defer c.volatile.RUnlock()
 	if len(buffer) < 1 {
+		log.Warn("handleUDPTunnel: empty buffer")
 		return errInvalidProtobuf
+	}
+	c.udpMu.RLock()
+	protobufEnvelope := c.udpProtobuf
+	c.udpMu.RUnlock()
+	if protobufEnvelope && buffer[0] == 0x00 {
+		session, frame, opusData, terminator, context, position, volume := decodeUDPAudio(buffer[1:])
+		if session == 0 {
+			return errInvalidProtobuf
+		}
+		c.dispatchOpus15(0, session, int64(frame), opusData, terminator, context, position, volume)
+		return nil
 	}
 	audioType := (buffer[0] >> 5) & 0x7
 	audioTarget := buffer[0] & 0x1F
 
 	// Opus only
-	// TODO: add handling for other packet types
 	if audioType != audioCodecIDOpus {
+		log.Warn("handleUDPTunnel: unsupported audio type %d (target=%d)",
+			audioType, audioTarget)
 		return errUnsupportedAudio
 	}
 
@@ -1003,10 +1027,6 @@ func (c *Client) handleQueryUsers(buffer []byte) error {
 	}
 	c.Config.Listeners.onACL(&event)
 	return nil
-}
-
-func (c *Client) handleCryptSetup(buffer []byte) error {
-	return errUnimplementedHandler
 }
 
 func (c *Client) handleContextActionModify(buffer []byte) error {

@@ -4,8 +4,8 @@ package gumble
 type Version struct {
 	// The semantic version information as a single unsigned integer.
 	//
-	// Bits 0-15 are the major version, bits 16-23 are the minor version, and
-	// bits 24-31 are the patch version.
+	// Bits 16-31 are the major version, bits 8-15 are the minor version, and
+	// bits 0-7 are the patch version.
 	Version uint32
 	// The name of the client.
 	Release string

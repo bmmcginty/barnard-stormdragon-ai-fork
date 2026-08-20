@@ -77,7 +77,7 @@ func (a AudioBuffer) writeAudio(client *Client, seq int64, final bool) error {
 	if err != nil {
 		return err
 	}
-	return client.Conn.WriteAudio(byte(4), targetID, seq, final, raw, nil, nil, nil)
+	return client.WriteAudio(byte(4), targetID, seq, final, raw, nil, nil, nil)
 }
 
 // AudioPacket contains incoming audio samples and information.

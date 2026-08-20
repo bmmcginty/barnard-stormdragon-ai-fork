@@ -6,10 +6,12 @@ import (
 	"math"
 	"net"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
+	"git.stormux.org/storm/barnard/log"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -31,7 +33,7 @@ const (
 )
 
 // ClientVersion is the protocol version that Client implements.
-const ClientVersion = 1<<16 | 3<<8 | 0
+const ClientVersion = 1<<16 | 5<<8 | 0
 
 // Client is the type used to create a connection to a server.
 type Client struct {
@@ -67,6 +69,21 @@ type Client struct {
 	// been sent to the server for targeting to work correctly. Setting to nil
 	// will disable voice targeting (i.e. switch back to regular speaking).
 	VoiceTarget *VoiceTarget
+
+	// UDP transport for audio (lower latency than TCP-tunneled audio).
+	udpMu             sync.RWMutex
+	udpWriteMu        sync.Mutex
+	udpConn           *net.UDPConn
+	udpStarted        bool
+	udpActive         bool
+	udpCryptoOut      *cryptState15
+	udpCryptoIn       *cryptState15
+	udpFrameNumber    uint64
+	udpProtobuf       bool
+	udpFallbackLogged atomic.Bool
+	udpFirstRecv      atomic.Bool
+	cryptOut          cryptState // client→server encryption
+	cryptIn           cryptState // server→client encryption
 
 	state uint32
 
@@ -133,6 +150,18 @@ func DialWithDialer(dialer *net.Dialer, config *Config, tlsConfig *tls.Config) (
 	}
 	client.Conn.WriteProto(&versionPacket)
 	client.Conn.WriteProto(&authenticationPacket)
+
+	// Start UDP transport immediately so it's ready when CryptSetup
+	// arrives during the sync handshake.
+	if !client.Config.DisableUDP {
+		if err := client.startUDP(); err != nil {
+			log.Warn("UDP setup failed, audio will use TCP tunnel: %v", err)
+		} else if client.udpConn != nil {
+			log.Info("UDP socket opened to %s, waiting for CryptSetup", client.udpConn.RemoteAddr())
+		}
+	} else {
+		log.Info("UDP disabled by config, audio will use TCP tunnel")
+	}
 
 	go client.pingRoutine()
 
@@ -238,6 +267,14 @@ func (c *Client) readRoutine() {
 		if err != nil {
 			break
 		}
+		// When UDP audio is active, ignore TCP-tunneled audio
+		// (packet type 1) to avoid double-processing packets.
+		c.udpMu.RLock()
+		udpActive := c.udpActive
+		c.udpMu.RUnlock()
+		if pType == 1 && udpActive {
+			continue
+		}
 		if int(pType) < len(handlers) {
 			handlers[pType](c, data)
 		}
@@ -246,6 +283,18 @@ func (c *Client) readRoutine() {
 	wasSynced := c.State() == StateSynced
 	atomic.StoreUint32(&c.state, uint32(StateDisconnected))
 	close(c.end)
+
+	// Clean up UDP connection.
+	c.udpMu.Lock()
+	udpConn := c.udpConn
+	c.udpConn = nil
+	c.udpActive = false
+	c.udpMu.Unlock()
+	if udpConn != nil {
+		log.Debug("closing UDP connection")
+		udpConn.Close()
+	}
+
 	if wasSynced {
 		c.Config.Listeners.onDisconnect(&c.disconnectEvent)
 	}
@@ -296,6 +345,51 @@ func (c *Client) EnableStereoEncoder() {
 	c.volatile.Lock()
 	defer c.volatile.Unlock()
 	c.useStereoEncoder = true
+}
+
+// WriteAudio writes an audio packet, preferring UDP when encryption is
+// set up. Falls back to TCP-tunneled audio when UDP is unavailable.
+
+func (c *Client) WriteAudio(format, target byte, sequence int64, final bool, data []byte, X, Y, Z *float32) error {
+	// Try Mumble 1.5 native UDP first (unless disabled)
+	if !c.Config.DisableUDP {
+		if sent, err := c.WriteAudioUDP15(format, uint32(target), sequence, data, final, X, Y, Z); sent {
+			if err != nil {
+				log.Error("UDP15 send error: %v", err)
+			}
+			return err
+		}
+	}
+	// Fall back to the TCP tunnel.
+	c.udpMu.RLock()
+	udpConn := c.udpConn
+	udpCryptoOut := c.udpCryptoOut
+	udpProtobuf := c.udpProtobuf
+	c.udpMu.RUnlock()
+	if !c.udpFallbackLogged.Swap(true) {
+		if c.Config.DisableUDP {
+			log.Info("UDP disabled, audio using TCP tunnel")
+		} else if udpConn == nil {
+			log.Info("no UDP socket, audio using TCP tunnel")
+		} else if udpCryptoOut == nil {
+			log.Info("UDP crypto not ready, audio using TCP tunnel")
+		}
+	}
+	if udpProtobuf {
+		// Mumble 1.5 uses the native UDP protobuf envelope even when audio is
+		// carried inside the TCP UDPTunnel packet.
+		payload := append([]byte{0x00}, encodeUDPAudio(uint32(target), uint64(sequence), data, final, X, Y, Z)...)
+		return c.Conn.WritePacket(1, payload)
+	}
+	return c.Conn.WriteAudio(format, target, sequence, final, data, X, Y, Z)
+}
+
+// UDPActive reports whether an authenticated UDP packet has confirmed the
+// return path and outgoing audio may use native UDP.
+func (c *Client) UDPActive() bool {
+	c.udpMu.RLock()
+	defer c.udpMu.RUnlock()
+	return c.udpActive
 }
 
 // DisableStereoEncoder switches back to mono encoding for voice.

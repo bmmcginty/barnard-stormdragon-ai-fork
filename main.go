@@ -116,6 +116,7 @@ func main() {
 	buffers := flag.Int("buffers", 16, "number of audio buffers to use")
 	profile := flag.Bool("profile", false, "add http server to serve profiles")
 	noiseSuppressionEnabled := flag.Bool("noise-suppression", false, "enable noise suppression for microphone input")
+	tcpOnly := flag.Bool("tcp", false, "disable UDP, force audio through TCP tunnel")
 	logLevel := flag.String("log", "warn", "log level: debug, info, warn, error")
 	logFile := flag.String("logfile", "", "write logs to this file (logging is disabled when omitted)")
 
@@ -212,6 +213,7 @@ func main() {
 		NoiseSuppressor: noise.NewSuppressor(),
 	}
 	b.Config.Buffers = *buffers
+	b.Config.DisableUDP = *tcpOnly
 
 	b.Hotkeys = b.UserConfig.GetHotkeys()
 	b.UserConfig.SaveConfig()

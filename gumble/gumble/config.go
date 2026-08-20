@@ -25,6 +25,9 @@ type Config struct {
 	// AudioDataBytes is the number of bytes that an audio frame can use.
 	AudioDataBytes int
 
+	// DisableUDP forces all audio to use the TCP tunnel instead of UDP.
+	DisableUDP bool
+
 	// The event listeners used when client events are triggered.
 	Listeners      Listeners
 	AudioListeners AudioListeners
