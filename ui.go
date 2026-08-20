@@ -39,7 +39,12 @@ func esc(str string) string {
 }
 
 func (b *Barnard) Notify(event string, who string, what string) {
-	b.notifyChannel <- []string{event, who, what}
+	// Notifications are best-effort: a slow external command must not block a
+	// UI or network callback. New events are dropped once the bounded queue is full.
+	select {
+	case b.notifyChannel <- []string{event, who, what}:
+	default:
+	}
 }
 
 func (b *Barnard) Beep() {

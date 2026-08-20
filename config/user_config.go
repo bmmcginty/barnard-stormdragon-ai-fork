@@ -150,7 +150,7 @@ func (c *Config) LoadConfig() {
 		jc.Username = &username
 	}
 	if c.config.NotifyCommand == nil {
-		ncmd := string("/usr/share/barnard/barnard-sound.sh \"%event\" \"%who\" \"%what\"")
+		ncmd := defaultNotifyCommand()
 		jc.NotifyCommand = &ncmd
 	}
 	if c.config.NoiseSuppressionEnabled == nil {

@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -45,31 +44,28 @@ func do_list_devices() {
 	show_devs("Inputs:", idevs)
 }
 
-func setup_notify_runner(notify_command string) chan []string {
-	t := make(chan []string)
-	var do_nothing = false
-	var err error
-	if err != nil {
-	}
-	if notify_command == "" {
-		do_nothing = true
-	}
-	go func(events chan []string, cmd_template string, dummy bool) {
-		for {
-			event := <-events
-			if !dummy {
-				t := string(cmd_template)
-				t = strings.ReplaceAll(t, "%event", shellescape.Quote(event[0]))
-				t = strings.ReplaceAll(t, "%who", shellescape.Quote(event[1]))
-				t = strings.ReplaceAll(t, "%what", shellescape.Quote(event[2]))
-				cmd := "/bin/sh"
-				args := []string{"-c", t}
-				x := exec.Command(cmd, args...)
-				x.Run()
-			} //if we actually have a command to run
-		} //for
-	}(t, notify_command, do_nothing)
-	return t
+const notificationQueueSize = 32
+
+func setup_notify_runner(notifyCommand string) chan []string {
+	events := make(chan []string, notificationQueueSize)
+	go func() {
+		for event := range events {
+			if notifyCommand != "" {
+				runNotification(expandNotification(notifyCommand, event))
+			}
+		}
+	}()
+	return events
+}
+
+// expandNotification replaces placeholders in one pass so text supplied for
+// one field cannot cause another placeholder to be expanded recursively.
+func expandNotification(template string, event []string) string {
+	return strings.NewReplacer(
+		"%event", shellescape.Quote(event[0]),
+		"%who", shellescape.Quote(event[1]),
+		"%what", shellescape.Quote(event[2]),
+	).Replace(template)
 }
 
 func main() {
