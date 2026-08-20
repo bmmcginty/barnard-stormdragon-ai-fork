@@ -9,56 +9,59 @@ import (
 // number.
 const MaxVarintLen = 10
 
-// Encode encodes the given value to varint format.
+// Encode encodes value in the Mumble varint format. It returns zero when b is
+// too small, rather than panicking on a caller-provided short buffer.
 func Encode(b []byte, value int64) int {
-	// 111111xx Byte-inverted negative two bit number (~xx)
+	var encoded [MaxVarintLen]byte
+	n := encode(encoded[:], value)
+	if n == 0 || len(b) < n {
+		return 0
+	}
+	copy(b, encoded[:n])
+	return n
+}
+
+func encode(b []byte, value int64) int {
 	if value <= -1 && value >= -4 {
 		b[0] = 0xFC | byte(^value&0xFF)
 		return 1
 	}
-	// 111110__ + varint Negative recursive varint
 	if value < 0 {
 		b[0] = 0xF8
-		return 1 + Encode(b[1:], -value)
+		// -math.MinInt64 overflows. The decoder intentionally interprets the
+		// following signed 64-bit payload as MinInt64 and negates it modulo 2^64.
+		if value == math.MinInt64 {
+			b[1] = 0xF4
+			binary.BigEndian.PutUint64(b[2:], uint64(value))
+			return 10
+		}
+		return 1 + encode(b[1:], -value)
 	}
-	// 0xxxxxxx 7-bit positive number
 	if value <= 0x7F {
 		b[0] = byte(value)
 		return 1
 	}
-	// 10xxxxxx + 1 byte 14-bit positive number
 	if value <= 0x3FFF {
-		b[0] = byte(((value >> 8) & 0x3F) | 0x80)
-		b[1] = byte(value & 0xFF)
+		b[0] = byte(value>>8)&0x3F | 0x80
+		b[1] = byte(value)
 		return 2
 	}
-	// 110xxxxx + 2 bytes 21-bit positive number
 	if value <= 0x1FFFFF {
-		b[0] = byte((value>>16)&0x1F | 0xC0)
-		b[1] = byte((value >> 8) & 0xFF)
-		b[2] = byte(value & 0xFF)
+		b[0] = byte(value>>16)&0x1F | 0xC0
+		b[1], b[2] = byte(value>>8), byte(value)
 		return 3
 	}
-	// 1110xxxx + 3 bytes 28-bit positive number
 	if value <= 0xFFFFFFF {
-		b[0] = byte((value>>24)&0xF | 0xE0)
-		b[1] = byte((value >> 16) & 0xFF)
-		b[2] = byte((value >> 8) & 0xFF)
-		b[3] = byte(value & 0xFF)
+		b[0] = byte(value>>24)&0x0F | 0xE0
+		b[1], b[2], b[3] = byte(value>>16), byte(value>>8), byte(value)
 		return 4
 	}
-	// 111100__ + int (32-bit) 32-bit positive number
 	if value <= math.MaxInt32 {
 		b[0] = 0xF0
 		binary.BigEndian.PutUint32(b[1:], uint32(value))
 		return 5
 	}
-	// 111101__ + long (64-bit) 64-bit number
-	if value <= math.MaxInt64 {
-		b[0] = 0xF4
-		binary.BigEndian.PutUint64(b[1:], uint64(value))
-		return 9
-	}
-
-	return 0
+	b[0] = 0xF4
+	binary.BigEndian.PutUint64(b[1:], uint64(value))
+	return 9
 }

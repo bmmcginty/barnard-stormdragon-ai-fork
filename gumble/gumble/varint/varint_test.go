@@ -1,6 +1,26 @@
 package varint // import "git.stormux.org/storm/barnard/gumble/gumble/varint"
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
+
+// Regression: MinInt64 formerly caused unbounded recursive encoding, and a
+// caller-provided short buffer caused an index panic.
+func TestEncodeMinInt64AndShortBuffer(t *testing.T) {
+	buf := make([]byte, MaxVarintLen)
+	n := Encode(buf, math.MinInt64)
+	if n != MaxVarintLen {
+		t.Fatalf("length = %d, want %d", n, MaxVarintLen)
+	}
+	got, consumed := Decode(buf[:n])
+	if consumed != n || got != math.MinInt64 {
+		t.Fatalf("decoded (%d, %d)", got, consumed)
+	}
+	if n := Encode(make([]byte, 1), 128); n != 0 {
+		t.Fatalf("short buffer returned %d", n)
+	}
+}
 
 func TestRange(t *testing.T) {
 
