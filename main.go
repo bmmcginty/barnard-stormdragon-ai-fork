@@ -115,6 +115,7 @@ func main() {
 	serverSet := false
 	usernameSet := false
 	buffers := flag.Int("buffers", 16, "number of audio buffers to use")
+	audioInterval := flag.Int("audio-interval", 10, "outgoing audio packet duration in ms (10, 20, 40, or 60)")
 	jitterBuffer := flag.Int("jitter-buffer", 40, "incoming per-user audio buffer in ms (0, 20, 40, or 60)")
 	profile := flag.Bool("profile", false, "add http server to serve profiles")
 	noiseSuppressionEnabled := flag.Bool("noise-suppression", false, "enable noise suppression for microphone input")
@@ -123,6 +124,10 @@ func main() {
 	logFile := flag.String("logfile", "", "write logs to this file (logging is disabled when omitted)")
 
 	flag.Parse()
+	selectedAudioInterval, err := audioIntervalDuration(*audioInterval)
+	if err != nil {
+		handle_raw_error(err)
+	}
 	selectedJitterBuffer, err := jitterBufferDuration(*jitterBuffer)
 	if err != nil {
 		handle_raw_error(err)
@@ -219,6 +224,7 @@ func main() {
 		NoiseSuppressor: noise.NewSuppressor(),
 	}
 	b.Config.Buffers = *buffers
+	b.Config.AudioInterval = selectedAudioInterval
 	b.Config.DisableUDP = *tcpOnly
 	b.Config.IncomingAudioBuffer = selectedJitterBuffer
 
@@ -258,6 +264,18 @@ func main() {
 	b.Ui = uiterm.New(&b)
 	b.Ui.Run(reader)
 	handle_error(&b)
+}
+
+// audioIntervalDuration converts the packet duration requested at startup to
+// one of the Opus durations supported by Mumble.
+func audioIntervalDuration(milliseconds int) (time.Duration, error) {
+	interval := time.Duration(milliseconds) * time.Millisecond
+	switch interval {
+	case 10 * time.Millisecond, 20 * time.Millisecond, 40 * time.Millisecond, 60 * time.Millisecond:
+		return interval, nil
+	default:
+		return 0, fmt.Errorf("audio interval must be 10, 20, 40, or 60 ms, got %d", milliseconds)
+	}
 }
 
 // jitterBufferDuration converts the requested incoming playout delay to a

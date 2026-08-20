@@ -263,11 +263,15 @@ func (c *Client) AudioOutgoing() chan<- AudioBuffer {
 	ch := make(chan AudioBuffer)
 	go func() {
 		var seq int64
+		frameStep := int64(c.Config.AudioFrameSize() / AudioDefaultFrameSize)
+		if frameStep < 1 {
+			frameStep = 1
+		}
 		previous := <-ch
 		for p := range ch {
 			previous.writeAudio(c, seq, false)
 			previous = p
-			seq = (seq + 1) % math.MaxInt32
+			seq = (seq + frameStep) % math.MaxInt32
 		}
 		if previous != nil {
 			previous.writeAudio(c, seq, true)
