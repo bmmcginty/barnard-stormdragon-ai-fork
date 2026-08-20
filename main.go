@@ -204,8 +204,8 @@ func main() {
 	}
 	b.Config.Buffers = *buffers
 	b.Config.AudioInterval = selectedAudioInterval
-	b.Config.DisableUDP = *tcpOnly
 	b.Config.IncomingAudioBuffer = selectedJitterBuffer
+	b.Config.DisableUDP = *tcpOnly
 
 	b.Hotkeys = b.UserConfig.GetHotkeys()
 	if err := b.UserConfig.SaveConfig(); err != nil {
@@ -275,8 +275,7 @@ func jitterBufferDuration(milliseconds int) (time.Duration, error) {
 	}
 }
 
-// serverAddress appends Mumble's default port unless the address already has
-// one. A bracketed or bare IPv6 literal is not a host:port pair.
+// serverAddress adds Mumble's default port without corrupting an IPv6 literal.
 func serverAddress(address string) string {
 	if _, port, err := net.SplitHostPort(address); err == nil && port != "" {
 		return address

@@ -118,28 +118,31 @@ func (c *Client) handleUDPTunnel(buffer []byte) error {
 	buffer = buffer[1:]
 	session, n := varint.Decode(buffer)
 	if n <= 0 {
+		log.Warn("handleUDPTunnel: session varint decode failed")
 		return errInvalidProtobuf
 	}
 	buffer = buffer[n:]
 	user := c.Users[uint32(session)]
 	if user == nil {
+		log.Warn("handleUDPTunnel: unknown user session=%d", session)
 		return errInvalidProtobuf
 	}
 	decoder := user.decoder
 	if decoder == nil {
-		// TODO: decoder pool
-		// TODO: de-reference after stream is done
 		codec := c.audioCodec
 		if codec == nil {
+			log.Warn("handleUDPTunnel: no audio codec available")
 			return errNoCodec
 		}
 		decoder = codec.NewDecoder()
 		user.decoder = decoder
+		log.Info("handleUDPTunnel: created new decoder for %s", user.Name)
 	}
 
 	// Sequence
 	seq, n := varint.Decode(buffer)
 	if n <= 0 {
+		log.Warn("handleUDPTunnel: seq varint decode failed")
 		return errInvalidProtobuf
 	}
 	buffer = buffer[n:]
@@ -170,13 +173,20 @@ func (c *Client) handleUDPTunnel(buffer []byte) error {
 	// Length
 	length, n := varint.Decode(buffer)
 	if n <= 0 {
+		log.Warn("handleUDPTunnel: length varint decode failed")
 		return errInvalidProtobuf
 	}
 	buffer = buffer[n:]
 	// Opus audio packets set the 13th bit in the size field as the terminator.
 	audioLength := int(length) &^ 0x2000
 	isFinal := (length & 0x2000) != 0
+
+	log.Info("handleUDPTunnel: %s session=%d seq=%d audio_len=%d final=%v buf_remain=%d",
+		user.Name, session, seq, audioLength, isFinal, len(buffer))
+
 	if audioLength > len(buffer) {
+		log.Warn("handleUDPTunnel: audio length %d > remaining buffer %d",
+			audioLength, len(buffer))
 		return errInvalidProtobuf
 	}
 
@@ -188,6 +198,9 @@ func (c *Client) handleUDPTunnel(buffer []byte) error {
 		decoder.Reset()
 		return err
 	}
+
+	log.Info("handleUDPTunnel: Opus decode OK for %s seq=%d pcm_samples=%d",
+		user.Name, seq, len(pcm))
 
 	event := AudioPacket{
 		Client: c,
@@ -271,6 +284,7 @@ func (c *Client) dispatchAudio(user *User, packet *AudioPacket) {
 
 	for _, delivery := range deliveries {
 		if delivery.new {
+			log.Debug("new audio stream from %s (session=%d)", user.Name, user.Session)
 			delivery.listener.OnAudioStream(&AudioStreamEvent{Client: c, User: user, C: delivery.ch})
 		}
 		// User removal can run on a different protocol goroutine. Keep the
@@ -283,6 +297,7 @@ func (c *Client) dispatchAudio(user *User, packet *AudioPacket) {
 			case delivery.ch <- packet:
 			default:
 				// Never allow a slow listener to block protocol processing.
+				log.Debug("dropping buffered audio for slow listener (session=%d)", user.Session)
 			}
 		}
 		listeners.mu.Unlock()
