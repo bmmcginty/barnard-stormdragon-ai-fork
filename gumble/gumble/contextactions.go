@@ -3,9 +3,10 @@ package gumble
 // ContextActions is a map of ContextActions.
 type ContextActions map[string]*ContextAction
 
-func (c ContextActions) create(action string) *ContextAction {
+func (c ContextActions) create(client *Client, action string) *ContextAction {
 	contextAction := &ContextAction{
-		Name: action,
+		Name:   action,
+		client: client,
 	}
 	c[action] = contextAction
 	return contextAction

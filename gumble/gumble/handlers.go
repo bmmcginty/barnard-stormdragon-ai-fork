@@ -156,26 +156,54 @@ func (c *Client) handleUDPTunnel(buffer []byte) error {
 		event.HasPosition = true
 	}
 
-	c.volatile.Lock()
-	for item := c.Config.AudioListeners.head; item != nil; item = item.next {
-		c.volatile.Unlock()
-		ch := item.streams[user]
-		if ch == nil {
-			ch = make(chan *AudioPacket)
-			item.streams[user] = ch
-			event := AudioStreamEvent{
-				Client: c,
-				User:   user,
-				C:      ch,
-			}
-			item.listener.OnAudioStream(&event)
-		}
-		ch <- &event
-		c.volatile.Lock()
-	}
-	c.volatile.Unlock()
-
+	c.dispatchAudio(user, &event)
 	return nil
+}
+
+// dispatchAudio sends an audio packet to all registered audio listeners.
+func (c *Client) dispatchAudio(user *User, packet *AudioPacket) {
+	listeners := &c.Config.AudioListeners
+	listeners.mu.Lock()
+	type delivery struct {
+		item     *audioEventItem
+		listener AudioListener
+		ch       chan *AudioPacket
+		new      bool
+	}
+	var deliveries []delivery
+	for item := listeners.head; item != nil; item = item.next {
+		ch := item.streams[user]
+		newStream := ch == nil
+		if newStream {
+			bufferSize := c.Config.Buffers
+			if bufferSize < 1 {
+				bufferSize = 1
+			}
+			ch = make(chan *AudioPacket, bufferSize)
+			item.streams[user] = ch
+		}
+		deliveries = append(deliveries, delivery{item, item.listener, ch, newStream})
+	}
+	listeners.mu.Unlock()
+
+	for _, delivery := range deliveries {
+		if delivery.new {
+			delivery.listener.OnAudioStream(&AudioStreamEvent{Client: c, User: user, C: delivery.ch})
+		}
+		// User removal can run on a different protocol goroutine. Keep the
+		// listener lock while sending so it cannot close this stream between
+		// the active-stream check and the channel send.
+		listeners.mu.Lock()
+		active := !delivery.item.detached && delivery.item.streams[user] == delivery.ch
+		if active {
+			select {
+			case delivery.ch <- packet:
+			default:
+				// Never allow a slow listener to block protocol processing.
+			}
+		}
+		listeners.mu.Unlock()
+	}
 }
 
 func (c *Client) handleAuthenticate(buffer []byte) error {
@@ -460,6 +488,20 @@ func (c *Client) handleUserRemove(buffer []byte) error {
 			delete(event.User.Channel.Users, session)
 		}
 		delete(c.Users, session)
+
+		// Close audio stream channels for the disconnected user. UDP audio may
+		// still be dispatched concurrently, so the audio-listener lock also
+		// protects its stream maps and channel sends.
+		listeners := &c.Config.AudioListeners
+		listeners.mu.Lock()
+		for item := listeners.head; item != nil; item = item.next {
+			if ch, ok := item.streams[event.User]; ok {
+				close(ch)
+				delete(item.streams, event.User)
+			}
+		}
+		listeners.mu.Unlock()
+
 		if packet.Reason != nil {
 			event.String = *packet.Reason
 		}
@@ -551,7 +593,7 @@ func (c *Client) handleUserState(buffer []byte) error {
 			}
 			newChannel := c.Channels[*packet.ChannelId]
 			if newChannel == nil {
-				c.volatile.Lock()
+				c.volatile.Unlock()
 				return errInvalidProtobuf
 			}
 			if newChannel != user.Channel {
@@ -924,7 +966,7 @@ func (c *Client) handleContextActionModify(buffer []byte) error {
 				return nil
 			}
 			event.Type = ContextActionAdd
-			contextAction := c.ContextActions.create(*packet.Action)
+			contextAction := c.ContextActions.create(c, *packet.Action)
 			if packet.Text != nil {
 				contextAction.Label = *packet.Text
 			}

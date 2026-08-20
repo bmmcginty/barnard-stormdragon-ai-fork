@@ -102,10 +102,11 @@ func DialWithDialer(dialer *net.Dialer, config *Config, tlsConfig *tls.Config) (
 	}
 
 	client := &Client{
-		Conn:     NewConn(conn),
-		Config:   config,
-		Users:    make(Users),
-		Channels: make(Channels),
+		Conn:           NewConn(conn),
+		Config:         config,
+		Users:          make(Users),
+		Channels:       make(Channels),
+		ContextActions: make(ContextActions),
 
 		permissions: make(map[uint32]*Permission),
 
