@@ -9,12 +9,12 @@ import (
 
 func (ti TreeItem) String() string {
 	if ti.User != nil {
-		if ti.User.LocallyMuted {
+		if ti.User.LocallyMuted() {
 			return "[MUTED] " + ti.User.Name
 		}
 		// Calculate total volume as percentage
-		boostPercent := float32(ti.User.Boost-1) * 10
-		totalVolume := ti.User.Volume*100 + boostPercent
+		boostPercent := float32(ti.User.Boost()-1) * 10
+		totalVolume := ti.User.Volume()*100 + boostPercent
 		return fmt.Sprintf("%s [%.0f%%]", ti.User.Name, totalVolume)
 	}
 	if ti.Channel != nil {
@@ -35,7 +35,7 @@ func (ti TreeItem) TreeItemStyle(fg, bg uiterm.Attribute, active bool) (uiterm.A
 
 func (b *Barnard) changeVolume(users []*gumble.User, change float32) {
 	for _, u := range users {
-		au := u.AudioSource
+		au := u.AudioSource()
 		if au == nil {
 			continue
 		}
@@ -43,7 +43,7 @@ func (b *Barnard) changeVolume(users []*gumble.User, change float32) {
 		var cv float32
 		var ng float32
 		var curboost float32
-		curboost = float32((u.Boost - 1)) / 10
+		curboost = float32((u.Boost() - 1)) / 10
 		cv = au.GetGain() + curboost
 		ng = cv + change
 		boost = uint16(1)
@@ -56,9 +56,9 @@ func (b *Barnard) changeVolume(users []*gumble.User, change float32) {
 		if ng < 0 {
 			ng = 0.0
 		}
-		u.Boost = boost
-		u.Volume = ng
-		if !u.LocallyMuted {
+		u.SetBoost(boost)
+		u.SetVolume(ng)
+		if !u.LocallyMuted() {
 			au.SetGain(ng)
 		}
 		b.UserConfig.UpdateConfig(u)
@@ -68,14 +68,14 @@ func (b *Barnard) changeVolume(users []*gumble.User, change float32) {
 
 func (b *Barnard) resetVolume(users []*gumble.User) {
 	for _, u := range users {
-		au := u.AudioSource
+		au := u.AudioSource()
 		if au == nil {
 			continue
 		}
 		// Reset to original volume (1.0) and boost (1)
-		u.Boost = uint16(1)
-		u.Volume = 1.0
-		if !u.LocallyMuted {
+		u.SetBoost(uint16(1))
+		u.SetVolume(1.0)
+		if !u.LocallyMuted() {
 			au.SetGain(1.0)
 		}
 		b.UserConfig.UpdateConfig(u)

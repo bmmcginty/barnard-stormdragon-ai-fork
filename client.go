@@ -179,11 +179,11 @@ func (b *Barnard) OnUserChange(e *gumble.UserChangeEvent) {
 			// If the channel is muted, ensure the user is muted
 			if b.MutedChannels[e.User.Channel.ID] {
 				// Only mute if not already muted
-				if !e.User.LocallyMuted {
+				if !e.User.LocallyMuted() {
 					b.UserConfig.ToggleMute(e.User)
 				}
-				if e.User.AudioSource != nil {
-					e.User.AudioSource.SetGain(0)
+				if source := e.User.AudioSource(); source != nil {
+					source.SetGain(0)
 				}
 			}
 		}

@@ -115,17 +115,17 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
 			users := makeUsersArray(treeItem.Channel.Users)
 			for _, u := range users {
 				// Explicitly set user mute state to match channel state
-				if channelWillBeMuted && !u.LocallyMuted {
+				if channelWillBeMuted && !u.LocallyMuted() {
 					b.UserConfig.ToggleMute(u)
-				} else if !channelWillBeMuted && u.LocallyMuted {
+				} else if !channelWillBeMuted && u.LocallyMuted() {
 					b.UserConfig.ToggleMute(u)
 				}
 
-				if u.AudioSource != nil {
-					if u.LocallyMuted {
-						u.AudioSource.SetGain(0)
+				if source := u.AudioSource(); source != nil {
+					if u.LocallyMuted() {
+						source.SetGain(0)
 					} else {
-						u.AudioSource.SetGain(u.Volume)
+						source.SetGain(u.Volume())
 					}
 				}
 			}
@@ -159,11 +159,11 @@ func (b *Barnard) TreeItemKeyPress(ui *uiterm.Ui, tree *uiterm.Tree, item uiterm
 		if key == *b.Hotkeys.MuteToggle {
 			// Toggle mute for single user
 			b.UserConfig.ToggleMute(treeItem.User)
-			if treeItem.User.AudioSource != nil {
-				if treeItem.User.LocallyMuted {
-					treeItem.User.AudioSource.SetGain(0)
+			if source := treeItem.User.AudioSource(); source != nil {
+				if treeItem.User.LocallyMuted() {
+					source.SetGain(0)
 				} else {
-					treeItem.User.AudioSource.SetGain(treeItem.User.Volume)
+					source.SetGain(treeItem.User.Volume())
 				}
 			}
 			b.RebuildUserChannelTreePreservingSelection()

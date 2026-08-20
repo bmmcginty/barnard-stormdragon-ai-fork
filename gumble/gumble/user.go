@@ -1,6 +1,8 @@
 package gumble
 
 import (
+	"sync"
+
 	"git.stormux.org/storm/barnard/gumble/go-openal/openal"
 	"git.stormux.org/storm/barnard/gumble/gumble/MumbleProto"
 	"google.golang.org/protobuf/proto"
@@ -31,9 +33,6 @@ type User struct {
 	PrioritySpeaker bool
 	// Is the user recording audio?
 	Recording bool
-	// Has the user been locally muted by the client?
-	LocallyMuted bool
-
 	// The user's comment. Contains the empty string if the user does not have a
 	// comment, or if the comment needs to be requested.
 	Comment string
@@ -53,14 +52,82 @@ type User struct {
 	client  *Client
 	decoder AudioDecoder
 
-	AudioSource *openal.Source
-	Boost       uint16
-	Volume      float32
+	// audioSequence tracks the last UDP audio frame timestamp for this user,
+	// used to detect packet loss and reset the Opus decoder.
+	audioSequence      int64
+	audioSequenceValid bool
+	audioFrameStep     int64
+
+	// audioMu protects audio-related fields accessed from both the
+	// audio processing goroutine (OnAudioStream) and the UI goroutine.
+	audioMu      sync.Mutex
+	audioSource  *openal.Source
+	boost        uint16
+	volume       float32
+	locallyMuted bool
+}
+
+// SetAudioSource sets the user's OpenAL audio source (thread-safe).
+func (u *User) SetAudioSource(src *openal.Source) {
+	u.audioMu.Lock()
+	u.audioSource = src
+	u.audioMu.Unlock()
+}
+
+// AudioSource returns the user's OpenAL audio source (thread-safe).
+// The caller must not retain the pointer across unlock boundaries;
+// it is only valid while the caller ensures the source is not deleted.
+func (u *User) AudioSource() *openal.Source {
+	u.audioMu.Lock()
+	defer u.audioMu.Unlock()
+	return u.audioSource
+}
+
+// SetBoost sets the user's audio boost multiplier (thread-safe).
+func (u *User) SetBoost(b uint16) {
+	u.audioMu.Lock()
+	u.boost = b
+	u.audioMu.Unlock()
+}
+
+// Boost returns the user's audio boost multiplier (thread-safe).
+func (u *User) Boost() uint16 {
+	u.audioMu.Lock()
+	defer u.audioMu.Unlock()
+	return u.boost
+}
+
+// SetVolume sets the user's volume level (thread-safe).
+func (u *User) SetVolume(v float32) {
+	u.audioMu.Lock()
+	u.volume = v
+	u.audioMu.Unlock()
+}
+
+// Volume returns the user's volume level (thread-safe).
+func (u *User) Volume() float32 {
+	u.audioMu.Lock()
+	defer u.audioMu.Unlock()
+	return u.volume
+}
+
+// SetLocallyMuted sets whether the user is locally muted (thread-safe).
+func (u *User) SetLocallyMuted(m bool) {
+	u.audioMu.Lock()
+	u.locallyMuted = m
+	u.audioMu.Unlock()
+}
+
+// LocallyMuted returns whether the user is locally muted (thread-safe).
+func (u *User) LocallyMuted() bool {
+	u.audioMu.Lock()
+	defer u.audioMu.Unlock()
+	return u.locallyMuted
 }
 
 // IsMuted returns true if the user is muted either server-side or locally
 func (u *User) IsMuted() bool {
-	return u.Muted || u.LocallyMuted
+	return u.Muted || u.LocallyMuted()
 }
 
 func (u *User) GetClient() *Client {

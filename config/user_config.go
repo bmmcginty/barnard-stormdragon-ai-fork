@@ -253,7 +253,7 @@ func (c *Config) findUser(address string, username string) *eUser {
 func (c *Config) ToggleMute(u *gumble.User) {
 	j := c.findUser(u.GetClient().Config.Address, u.Name)
 	j.LocallyMuted = !j.LocallyMuted
-	u.LocallyMuted = j.LocallyMuted
+	u.SetLocallyMuted(j.LocallyMuted)
 	c.SaveConfig()
 }
 
@@ -329,11 +329,11 @@ func (c *Config) UpdateUser(u *gumble.User) {
 	uc = u.GetClient()
 	if uc != nil {
 		j = c.findUser(uc.Config.Address, u.Name)
-		u.Boost = j.Boost
-		u.Volume = j.Volume
-		u.LocallyMuted = j.LocallyMuted // Update LocallyMuted state from config
-		if u.Boost < 1 {
-			u.Boost = 1
+		u.SetBoost(j.Boost)
+		u.SetVolume(j.Volume)
+		u.SetLocallyMuted(j.LocallyMuted) // Update LocallyMuted state from config
+		if u.Boost() < 1 {
+			u.SetBoost(1)
 		}
 	}
 }
@@ -341,9 +341,9 @@ func (c *Config) UpdateUser(u *gumble.User) {
 func (c *Config) UpdateConfig(u *gumble.User) {
 	var j *eUser
 	j = c.findUser(u.GetClient().Config.Address, u.Name)
-	j.Boost = u.Boost
-	j.Volume = u.Volume
-	j.LocallyMuted = u.LocallyMuted // Save LocallyMuted state to config
+	j.Boost = u.Boost()
+	j.Volume = u.Volume()
+	j.LocallyMuted = u.LocallyMuted() // Save LocallyMuted state to config
 }
 
 func NewConfig(fn *string) *Config {

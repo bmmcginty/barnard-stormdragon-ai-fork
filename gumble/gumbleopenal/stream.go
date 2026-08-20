@@ -231,13 +231,13 @@ func (s *Stream) SetMicVolume(change float32, relative bool) {
 func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 	go func(e *gumble.AudioStreamEvent) {
 		var source = openal.NewSource()
-		e.User.AudioSource = &source
+		e.User.SetAudioSource(&source)
 
 		// Set initial gain based on volume and mute state
-		if e.User.LocallyMuted {
-			e.User.AudioSource.SetGain(0)
+		if e.User.LocallyMuted() {
+			source.SetGain(0)
 		} else {
-			e.User.AudioSource.SetGain(e.User.Volume)
+			source.SetGain(e.User.Volume())
 		}
 
 		bufferCount := e.Client.Config.Buffers
@@ -258,7 +258,7 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 
 		for packet := range e.C {
 			// Skip processing if user is locally muted
-			if e.User.LocallyMuted {
+			if e.User.LocallyMuted() {
 				continue
 			}
 
@@ -268,7 +268,7 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 				continue
 			}
 
-			boost = e.User.Boost
+			boost = e.User.Boost()
 			recorder := s.getRecorder()
 			var recordBuffer []int16
 			recordPtr := 0
@@ -301,7 +301,7 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 						}
 					}
 					if recorder != nil {
-						recordBuffer[recordPtr] = scaleForRecording(sample, e.User.Volume)
+						recordBuffer[recordPtr] = scaleForRecording(sample, e.User.Volume())
 						recordPtr++
 					}
 					binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
@@ -320,7 +320,7 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 						}
 					}
 					if recorder != nil {
-						recordBuffer[recordPtr] = scaleForRecording(sample, e.User.Volume)
+						recordBuffer[recordPtr] = scaleForRecording(sample, e.User.Volume())
 						recordPtr++
 					}
 					binary.LittleEndian.PutUint16(raw[rawPtr:], uint16(sample))
@@ -341,7 +341,7 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 						}
 					}
 					if recorder != nil {
-						recordSample := scaleForRecording(sample, e.User.Volume)
+						recordSample := scaleForRecording(sample, e.User.Volume())
 						recordBuffer[recordPtr] = recordSample
 						recordBuffer[recordPtr+1] = recordSample
 						recordPtr += 2
