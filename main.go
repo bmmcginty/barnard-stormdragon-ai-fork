@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -188,9 +189,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	if !strings.Contains(*server, ":") {
-		*server = (*server + ":64738")
-	}
+	*server = serverAddress(*server)
 
 	// Initialize
 	b := Barnard{
@@ -274,6 +273,15 @@ func jitterBufferDuration(milliseconds int) (time.Duration, error) {
 	default:
 		return 0, fmt.Errorf("jitter buffer must be 0, 20, 40, or 60 ms, got %d", milliseconds)
 	}
+}
+
+// serverAddress appends Mumble's default port unless the address already has
+// one. A bracketed or bare IPv6 literal is not a host:port pair.
+func serverAddress(address string) string {
+	if _, port, err := net.SplitHostPort(address); err == nil && port != "" {
+		return address
+	}
+	return net.JoinHostPort(strings.Trim(address, "[]"), "64738")
 }
 
 func handle_raw_error(e error) {
