@@ -1,6 +1,7 @@
 package gumble
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -41,6 +42,22 @@ func NewConfig() *Config {
 		AudioInterval:  AudioDefaultInterval,
 		AudioDataBytes: AudioDefaultDataBytes,
 	}
+}
+
+// Validate checks values that are used by the audio ticker and encoder.
+func (c *Config) Validate() error {
+	switch c.AudioInterval {
+	case 10 * time.Millisecond, 20 * time.Millisecond, 40 * time.Millisecond, 60 * time.Millisecond:
+	default:
+		return fmt.Errorf("gumble: AudioInterval must be 10ms, 20ms, 40ms, or 60ms")
+	}
+	if c.AudioDataBytes <= 0 {
+		return fmt.Errorf("gumble: AudioDataBytes must be positive")
+	}
+	if c.Buffers <= 0 {
+		return fmt.Errorf("gumble: Buffers must be positive")
+	}
+	return nil
 }
 
 // Attach is an alias of c.Listeners.Attach.

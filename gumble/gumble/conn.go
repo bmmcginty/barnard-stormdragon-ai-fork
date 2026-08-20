@@ -80,7 +80,10 @@ func (c *Conn) WriteAudio(format, target byte, sequence int64, final bool, data 
 	header := buff[:1+n+m]
 
 	var positionalLength int
-	if X != nil {
+	if X != nil || Y != nil || Z != nil {
+		if X == nil || Y == nil || Z == nil {
+			return errors.New("gumble: positional audio requires X, Y, and Z")
+		}
 		positionalLength = 3 * 4
 	}
 

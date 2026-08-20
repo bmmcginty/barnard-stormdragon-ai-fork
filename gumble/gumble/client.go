@@ -125,6 +125,9 @@ func tlsServerName(address string) (string, error) {
 // min(time.Now() + dialer.Timeout, dialer.Deadline), or if the server rejects
 // the client.
 func DialWithDialer(dialer *net.Dialer, config *Config, tlsConfig *tls.Config) (*Client, error) {
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
 	start := time.Now()
 
 	rawConn, err := dialer.Dial("tcp", config.Address)
