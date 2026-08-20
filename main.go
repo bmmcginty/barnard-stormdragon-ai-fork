@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 
+	barnlog "git.stormux.org/storm/barnard/log"
+
 	"git.stormux.org/storm/barnard/config"
 	"git.stormux.org/storm/barnard/gumble/go-openal/openal"
 	"git.stormux.org/storm/barnard/gumble/gumble"
@@ -114,8 +116,36 @@ func main() {
 	buffers := flag.Int("buffers", 16, "number of audio buffers to use")
 	profile := flag.Bool("profile", false, "add http server to serve profiles")
 	noiseSuppressionEnabled := flag.Bool("noise-suppression", false, "enable noise suppression for microphone input")
+	logLevel := flag.String("log", "warn", "log level: debug, info, warn, error")
+	logFile := flag.String("logfile", "", "write logs to this file (logging is disabled when omitted)")
 
 	flag.Parse()
+
+	// Set up logging
+	var level barnlog.Level
+	switch strings.ToLower(*logLevel) {
+	case "debug":
+		level = barnlog.LevelDebug
+	case "info":
+		level = barnlog.LevelInfo
+	case "warn":
+		level = barnlog.LevelWarn
+	case "error":
+		level = barnlog.LevelError
+	default:
+		level = barnlog.LevelWarn
+	}
+	// Logging is opt-in. Select /dev/stderr explicitly when terminal logging is
+	// desired; otherwise library diagnostics must not corrupt terminal output.
+	barnlog.SetLogger(nil)
+	if *logFile != "" {
+		f, err := os.OpenFile(*logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cannot open log file %s: %v\n", *logFile, err)
+		} else {
+			barnlog.SetLogger(barnlog.NewWriterLogger(f, level))
+		}
+	}
 
 	if *profile == true {
 		go func() {
