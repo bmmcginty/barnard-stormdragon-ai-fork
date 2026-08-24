@@ -72,6 +72,48 @@ func (t *Textview) ScrollBottom() {
 	t.uiDraw()
 }
 
+const (
+	// maxScrollbackLines bounds the retained chat history. It used to grow for
+	// the life of the process, and every line added re-wrapped the whole
+	// buffer, so the cost of a session grew as the square of its length. This
+	// is far more history than a reader ever scrolls back through.
+	maxScrollbackLines = 10000
+	// scrollbackTrimChunk is how much history is discarded once the cap is
+	// reached. Trimming a block at a time means the rebuild it forces happens
+	// once every scrollbackTrimChunk lines rather than on every line, which
+	// keeps the amortised cost of an append constant.
+	scrollbackTrimChunk = 1000
+)
+
+// wrapLine renders one stored line as the display lines it occupies.
+func (t *Textview) wrapLine(line string, width int) []string {
+	l := line
+	if !t.showTimestamps {
+		// Server and local messages need not have a timestamp prefix.
+		if _, text, ok := strings.Cut(line, "]"); ok {
+			l = strings.TrimSpace(text)
+		}
+	}
+	var wrapped []string
+	// A Builder keeps this linear; appending a rune at a time to a string
+	// reallocates once per character.
+	var current strings.Builder
+	chars := 0
+	for _, ch := range l {
+		if chars >= width {
+			wrapped = append(wrapped, current.String())
+			current.Reset()
+			chars = 0
+		}
+		current.WriteRune(ch)
+		chars++
+	}
+	if chars > 0 {
+		wrapped = append(wrapped, current.String())
+	}
+	return wrapped
+}
+
 func (t *Textview) updateParsedLines() {
 	width := t.x1 - t.x0
 
@@ -83,33 +125,7 @@ func (t *Textview) updateParsedLines() {
 
 	parsed := make([]string, 0, len(t.Lines))
 	for _, line := range t.Lines {
-		var l = line
-		if !t.showTimestamps {
-			// Server and local messages need not have a timestamp prefix.
-			if _, text, ok := strings.Cut(line, "]"); ok {
-				l = strings.TrimSpace(text)
-			}
-		}
-		current := ""
-		chars := 0
-		reader := strings.NewReader(l)
-		for {
-			if chars >= width {
-				parsed = append(parsed, current)
-				chars = 0
-				current = ""
-			}
-			if reader.Len() <= 0 {
-				if chars > 0 {
-					parsed = append(parsed, current)
-				}
-				break
-			}
-			if ch, _, err := reader.ReadRune(); err == nil {
-				current = current + string(ch)
-				chars++
-			}
-		}
+		parsed = append(parsed, t.wrapLine(line, width)...)
 	}
 	t.parsedLines = parsed
 	t.clampCurrentLine()
@@ -117,7 +133,19 @@ func (t *Textview) updateParsedLines() {
 
 func (t *Textview) AddLine(line string) {
 	t.Lines = append(t.Lines, line)
-	t.updateParsedLines()
+	if len(t.Lines) > maxScrollbackLines {
+		// Trimming invalidates the wrapped buffer and forces a rebuild, so
+		// discard a block rather than a single line; otherwise every append
+		// past the cap would re-wrap the whole buffer.
+		keep := maxScrollbackLines - scrollbackTrimChunk
+		t.Lines = append(t.Lines[:0], t.Lines[len(t.Lines)-keep:]...)
+		t.updateParsedLines()
+	} else if width := t.x1 - t.x0; width > 0 {
+		// Wrap just the new line. Rebuilding every stored line on each append
+		// is what made a long-lived session stall the terminal.
+		t.parsedLines = append(t.parsedLines, t.wrapLine(line, width)...)
+		t.clampCurrentLine()
+	}
 	t.uiDraw()
 }
 
