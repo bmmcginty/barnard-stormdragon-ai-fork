@@ -181,7 +181,12 @@ func DialWithDialer(dialer *net.Dialer, config *Config, tlsConfig *tls.Config) (
 
 		state: uint32(StateConnected),
 
-		connect: make(chan *RejectError),
+		// Buffered: once DialWithDialer returns on its synchronization
+		// timeout nothing reads this channel again, and an unbuffered send
+		// from handleReject would block readRoutine forever, leaking the
+		// goroutine along with the client, its user and channel maps and its
+		// multi-megabyte read buffer.
+		connect: make(chan *RejectError, 1),
 		end:     make(chan struct{}),
 	}
 
