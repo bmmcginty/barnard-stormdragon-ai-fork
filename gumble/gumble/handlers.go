@@ -184,8 +184,10 @@ func (c *Client) handleUDPTunnel(buffer []byte) error {
 	log.Info("handleUDPTunnel: %s session=%d seq=%d audio_len=%d final=%v buf_remain=%d",
 		user.Name, session, seq, audioLength, isFinal, len(buffer))
 
-	if audioLength > len(buffer) {
-		log.Warn("handleUDPTunnel: audio length %d > remaining buffer %d",
+	// A negative length would pass the upper bound check below and then panic
+	// on the slice expression.
+	if audioLength < 0 || audioLength > len(buffer) {
+		log.Warn("handleUDPTunnel: audio length %d out of range for buffer %d",
 			audioLength, len(buffer))
 		return errInvalidProtobuf
 	}
