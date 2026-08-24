@@ -108,8 +108,12 @@ func (b *Barnard) connect(reconnect bool) bool {
 		}
 	})
 
-	// Initialize stereo encoder for file playback
-	b.Client.SetStereoEncoder(opus.NewStereoEncoder())
+	// Initialize stereo encoder for file playback, reusing the one built for
+	// the previous connection rather than allocating another.
+	if b.stereoEncoder == nil {
+		b.stereoEncoder = opus.NewStereoEncoder()
+	}
+	b.Client.SetStereoEncoder(b.stereoEncoder)
 
 	// Initialize file player
 	b.FileStreamMutex.Lock()

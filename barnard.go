@@ -70,6 +70,10 @@ type Barnard struct {
 	// Added for file playback
 	FileStream      *fileplayback.Player
 	FileStreamMutex sync.Mutex
+	// stereoEncoder is reused across connections. Each one holds a little
+	// under a megabyte of encoder state, so building a fresh one per
+	// reconnect is pure churn; it is reset when file playback ends.
+	stereoEncoder gumble.AudioEncoder
 
 	// Added for tone test mode (bypasses all soundcard/OpenAL)
 	ToneTest            bool
