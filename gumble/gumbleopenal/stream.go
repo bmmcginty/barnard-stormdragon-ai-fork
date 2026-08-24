@@ -613,6 +613,9 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 				return nil
 			}
 			p := jitterBuf[0]
+			// Clear the slot before resliceing: the popped entries stay in
+			// the backing array otherwise, pinning a decoded frame each.
+			jitterBuf[0] = nil
 			jitterBuf = jitterBuf[1:]
 			jitterDuration -= audioPacketDuration(p)
 			// Frame numbers are Mumble timestamps in 10 ms units.
@@ -694,6 +697,7 @@ func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
 									jitterBuf[0].Sequence, e.User.Name, jitterNextSeq, len(jitterBuf))
 							}
 							jitterDuration -= audioPacketDuration(jitterBuf[0])
+							jitterBuf[0] = nil
 							jitterBuf = jitterBuf[1:]
 							continue
 						}
