@@ -16,6 +16,10 @@ import (
 // DefaultPort is the default port on which Mumble servers listen.
 const DefaultPort = 64738
 
+// retainedPacketBytes is the largest read buffer kept between packets. Bigger
+// buffers are allocated as needed and released again afterwards.
+const retainedPacketBytes = 64 * 1024
+
 // Conn represents a control protocol connection to a Mumble client/server.
 type Conn struct {
 	sync.Mutex
@@ -54,6 +58,11 @@ func (c *Conn) ReadPacket() (uint16, []byte, error) {
 	}
 	if pLengthInt > len(c.buffer) {
 		c.buffer = make([]byte, pLengthInt)
+	} else if len(c.buffer) > retainedPacketBytes && pLengthInt <= retainedPacketBytes {
+		// One oversized packet — a large ACL, user list or channel comment —
+		// used to pin its full size for the life of the connection. Give the
+		// memory back once ordinary traffic resumes.
+		c.buffer = make([]byte, retainedPacketBytes)
 	}
 	if _, err := io.ReadFull(c.Conn, c.buffer[:pLengthInt]); err != nil {
 		return 0, nil, err
