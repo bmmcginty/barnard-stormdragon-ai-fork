@@ -447,6 +447,23 @@ func (c *Client) handleChannelRemove(buffer []byte) error {
 	return nil
 }
 
+// maxChannelDepth bounds ancestry walks over a channel tree that may already
+// be cyclic. Real Mumble trees are far shallower than this.
+const maxChannelDepth = 1024
+
+// isChannelDescendant reports whether candidate is channel itself or sits
+// below it in the channel tree. The walk is bounded so an already-cyclic
+// graph cannot hang the caller.
+func isChannelDescendant(candidate, channel *Channel) bool {
+	for i := 0; candidate != nil && i <= maxChannelDepth; i++ {
+		if candidate == channel {
+			return true
+		}
+		candidate = candidate.Parent
+	}
+	return false
+}
+
 func (c *Client) handleChannelState(buffer []byte) error {
 	var packet MumbleProto.ChannelState
 	if err := proto.Unmarshal(buffer, &packet); err != nil {
@@ -473,16 +490,25 @@ func (c *Client) handleChannelState(buffer []byte) error {
 		}
 		event.Channel = channel
 		if packet.Parent != nil {
-			if channel.Parent != nil {
-				delete(channel.Parent.Children, channelID)
-			}
 			newParent := c.Channels[*packet.Parent]
-			if newParent != channel.Parent {
-				event.Type |= ChannelChangeMoved
-			}
-			channel.Parent = newParent
-			if channel.Parent != nil {
-				channel.Parent.Children[channel.ID] = channel
+			// Reparenting a channel under itself or one of its own
+			// descendants makes Parent/Children cyclic, and anything that
+			// walks the tree then recurses until it exhausts memory. Ignore
+			// the move rather than corrupt the channel graph.
+			if isChannelDescendant(newParent, channel) {
+				log.Warn("handleChannelState: ignoring cyclic parent %d for channel %d",
+					*packet.Parent, channelID)
+			} else {
+				if channel.Parent != nil {
+					delete(channel.Parent.Children, channelID)
+				}
+				if newParent != channel.Parent {
+					event.Type |= ChannelChangeMoved
+				}
+				channel.Parent = newParent
+				if channel.Parent != nil {
+					channel.Parent.Children[channel.ID] = channel
+				}
 			}
 		}
 		if packet.Name != nil {
