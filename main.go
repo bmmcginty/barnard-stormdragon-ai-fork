@@ -105,6 +105,10 @@ func main() {
 	if err != nil {
 		handle_raw_error(err)
 	}
+	if *buffers <= 0 || *buffers > gumble.MaximumBuffers {
+		handle_raw_error(fmt.Errorf("buffers must be between 1 and %d, got %d",
+			gumble.MaximumBuffers, *buffers))
+	}
 
 	// Set up logging
 	var level barnlog.Level

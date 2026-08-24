@@ -38,6 +38,12 @@ type Config struct {
 	Buffers        int
 }
 
+// MaximumBuffers caps Config.Buffers. Each buffer holds up to one maximum
+// sized audio frame and is allocated per speaking user, so a large value
+// multiplied by a populated channel is a substantial amount of memory. A few
+// seconds of buffering is already far more than playback needs.
+const MaximumBuffers = 1024
+
 // NewConfig returns a new Config struct with default values set.
 func NewConfig() *Config {
 	return &Config{
@@ -63,6 +69,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Buffers <= 0 {
 		return fmt.Errorf("gumble: Buffers must be positive")
+	}
+	// Buffers is allocated per speaking user, both as a queue of decoded
+	// frames and as OpenAL playback buffers, so an unbounded value multiplies
+	// straight into memory use as a channel fills up.
+	if c.Buffers > MaximumBuffers {
+		return fmt.Errorf("gumble: Buffers must be at most %d", MaximumBuffers)
 	}
 	return nil
 }
