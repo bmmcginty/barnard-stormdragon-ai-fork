@@ -104,6 +104,7 @@ func (b *Barnard) connect(reconnect bool) bool {
 
 	// Initialize file player
 	b.FileStreamMutex.Lock()
+	previousFile := b.FileStream
 	b.FileStream = fileplayback.New(b.Client)
 	b.FileStream.SetErrorFunc(func(err error) {
 		// Disable stereo when file finishes or errors
@@ -113,8 +114,24 @@ func (b *Barnard) connect(reconnect bool) bool {
 	stream.SetFilePlayer(b.FileStream)
 	b.FileStreamMutex.Unlock()
 	b.connectionMutex.Lock()
+	previousStream := b.Stream
 	b.Stream = stream
 	b.connectionMutex.Unlock()
+
+	// A disconnect that lands while the OpenAL devices are opening starts a
+	// second reconnect, so two connects can race to install a stream. The one
+	// that loses must be released here: an orphaned stream keeps its OpenAL
+	// device, its render thread and — because only Destroy detaches it — its
+	// entry in the shared audio listener list, so every later audio packet
+	// from every user is dispatched to it as well, for the life of the
+	// process. Release outside the locks, since Destroy waits on the
+	// per-user audio goroutines.
+	if previousFile != nil {
+		_ = previousFile.Stop()
+	}
+	if previousStream != nil {
+		previousStream.Destroy()
+	}
 
 	b.setConnected(true)
 	// Dial delivers OnConnect before connect creates the OpenAL stream, so
@@ -223,7 +240,27 @@ func (b *Barnard) OnDisconnect(e *gumble.DisconnectEvent) {
 		b.UiTree.Rebuild()
 		b.Ui.Refresh()
 	})
-	go b.reconnectGoroutine()
+	b.startReconnect()
+}
+
+// startReconnect launches the reconnect loop unless one is already running.
+// Disconnect notifications can arrive more than once for a connection, and
+// every extra loop is another connect racing to install its own audio stream.
+func (b *Barnard) startReconnect() {
+	b.reconnectMutex.Lock()
+	defer b.reconnectMutex.Unlock()
+	if b.reconnecting {
+		return
+	}
+	b.reconnecting = true
+	go func() {
+		defer func() {
+			b.reconnectMutex.Lock()
+			b.reconnecting = false
+			b.reconnectMutex.Unlock()
+		}()
+		b.reconnectGoroutine()
+	}()
 }
 
 func (b *Barnard) reconnectGoroutine() {

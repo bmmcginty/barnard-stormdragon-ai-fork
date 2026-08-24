@@ -91,6 +91,8 @@ type Barnard struct {
 
 	reconnectStop     chan struct{}
 	reconnectStopOnce sync.Once
+	reconnectMutex    sync.Mutex
+	reconnecting      bool
 }
 
 // cleanupConnectionAudio releases connection-owned audio resources before a
