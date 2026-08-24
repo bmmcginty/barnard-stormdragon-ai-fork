@@ -61,15 +61,24 @@ func (b *Barnard) connect(reconnect bool) bool {
 		// --- Tone test mode: skip all OpenAL; generate 440 Hz tone
 		// --- and save incoming audio to a file.
 
-		// Open the output first. Starting transmission before this succeeds
-		// leaves an orphaned tone goroutine when the path is unusable.
-		saver, err := NewAudioFileSaver(b.ToneTestOutput)
-		if err != nil {
-			b.exitWithError(err)
-			return false
+		// The output is reserved exclusively, so it can only be opened once.
+		// A reconnect keeps writing to the saver opened for the first
+		// connection instead of failing on the file that already exists.
+		if b.toneTestSaver == nil {
+			// Open the output first. Starting transmission before this
+			// succeeds leaves an orphaned tone goroutine when the path is
+			// unusable.
+			saver, err := NewAudioFileSaver(b.ToneTestOutput)
+			if err != nil {
+				b.exitWithError(err)
+				return false
+			}
+			b.toneTestSaver = saver
 		}
-		b.toneTestSaver = saver
-		b.toneTestSaverDetach = b.Client.Config.AttachAudio(saver)
+		// Detach any registration left over from the previous connection so
+		// the shared audio listener list does not grow once per reconnect.
+		b.detachToneTestAudio()
+		b.toneTestSaverDetach = b.Client.Config.AttachAudio(b.toneTestSaver)
 
 		b.setConnected(true)
 		if b.toneTestAutoTransmit() {
@@ -225,7 +234,9 @@ func (b *Barnard) OnDisconnect(e *gumble.DisconnectEvent) {
 			close(b.toneTestStop)
 			b.toneTestStop = nil
 		}
-		b.cleanupToneTestAudio()
+		// Keep the saver's output open: it was reserved exclusively and a
+		// reconnect re-attaches the same file. It is closed on exit.
+		b.detachToneTestAudio()
 	}
 
 	b.Notify("disconnect", "me", reason)

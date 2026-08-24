@@ -445,15 +445,19 @@ func (b *Barnard) OnMicVolumeUp(ui *uiterm.Ui, key uiterm.Key) {
 }
 
 func (b *Barnard) OnQuitPress(ui *uiterm.Ui, key uiterm.Key) {
-	b.stopReconnects()
-	b.StopRecordingIfActive(true)
-	b.Client.Disconnect()
-	b.Ui.Close()
+	b.shutdown()
 }
 
 func (b *Barnard) CommandExit(ui *uiterm.Ui, cmd string) {
+	b.shutdown()
+}
+
+// shutdown releases everything that outlives a single connection, including
+// the tone test saver's output file, which reconnects deliberately keep open.
+func (b *Barnard) shutdown() {
 	b.stopReconnects()
 	b.StopRecordingIfActive(true)
+	b.cleanupToneTestAudio()
 	b.Client.Disconnect()
 	b.Ui.Close()
 }

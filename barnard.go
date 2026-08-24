@@ -116,11 +116,20 @@ func (b *Barnard) cleanupConnectionAudio() {
 	b.connectionMutex.Unlock()
 }
 
-func (b *Barnard) cleanupToneTestAudio() {
+// detachToneTestAudio unsubscribes the saver without closing its output, so a
+// reconnect can re-attach the same file. The saver's output is opened
+// exclusively and cannot be reopened.
+func (b *Barnard) detachToneTestAudio() {
 	if b.toneTestSaverDetach != nil {
 		b.toneTestSaverDetach.Detach()
 		b.toneTestSaverDetach = nil
 	}
+}
+
+// cleanupToneTestAudio detaches the saver and closes its output. Use it when
+// the client is shutting down, not between connections.
+func (b *Barnard) cleanupToneTestAudio() {
+	b.detachToneTestAudio()
 	if b.toneTestSaver != nil {
 		b.toneTestSaver.Stop()
 		b.toneTestSaver = nil
