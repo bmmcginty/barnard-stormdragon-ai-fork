@@ -89,10 +89,10 @@ func (t *Tree) rebuild(preserveActive bool, sameItem func(previous, current Tree
 	previousLine := t.activeLine
 	lines := []renderedTreeItem{}
 	for _, item := range t.Generator(nil) {
-		children := t.rebuild_rec(item, 0)
-		if children != nil {
-			lines = append(lines, children...)
+		if len(lines) >= maxTreeLines {
+			break
 		}
+		lines = t.rebuild_rec(lines, item, 0)
 	}
 	t.lines = lines
 	if preserveActive {
@@ -113,21 +113,31 @@ func (t *Tree) rebuild(preserveActive bool, sameItem func(previous, current Tree
 	}
 }
 
-func (t *Tree) rebuild_rec(parent TreeItem, level int) []renderedTreeItem {
-	if parent == nil {
-		return nil
+// A server is free to describe a channel graph in which a channel is its own
+// ancestor. The generator follows parent/child links literally, so without
+// these limits such a graph recurses until the process is out of memory.
+// Real trees are orders of magnitude smaller than either bound.
+const (
+	maxTreeDepth = 64
+	maxTreeLines = 100000
+)
+
+// rebuild_rec appends parent and its descendants to lines. Accumulating into
+// one slice keeps maxTreeLines a budget for the whole tree rather than for
+// each level, and avoids building a slice per node.
+func (t *Tree) rebuild_rec(lines []renderedTreeItem, parent TreeItem, level int) []renderedTreeItem {
+	if parent == nil || level >= maxTreeDepth || len(lines) >= maxTreeLines {
+		return lines
 	}
-	lines := []renderedTreeItem{
-		renderedTreeItem{
-			Level: level,
-			Item:  parent,
-		},
-	}
+	lines = append(lines, renderedTreeItem{
+		Level: level,
+		Item:  parent,
+	})
 	for _, item := range t.Generator(parent) {
-		children := t.rebuild_rec(item, level+1)
-		if children != nil {
-			lines = append(lines, children...)
+		if len(lines) >= maxTreeLines {
+			break
 		}
+		lines = t.rebuild_rec(lines, item, level+1)
 	}
 	return lines
 }
