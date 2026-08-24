@@ -138,6 +138,10 @@ type Stream struct {
 	recorderMu          sync.RWMutex
 	errorFunc           func(error) // called on capture errors
 	recorder            Recorder
+	// streamWG tracks the per-user goroutines started by OnAudioStream. They
+	// release their OpenAL source and buffers through the renderer, so Destroy
+	// must let them finish before it tears the renderer down.
+	streamWG sync.WaitGroup
 }
 
 func New(client *gumble.Client, inputDevice *string, outputDevice *string, test bool) (*Stream, error) {
@@ -393,13 +397,37 @@ func (s *Stream) getRecorder() Recorder {
 	return s.recorder
 }
 
+// destroyDrainTimeout bounds how long Destroy waits for the per-user audio
+// goroutines to finish draining, so a wedged renderer cannot hang a reconnect.
+const destroyDrainTimeout = 2 * time.Second
+
 func (s *Stream) Destroy() {
 	if s.link != nil {
+		// Detach closes every per-user stream channel, which ends the
+		// goroutines started by OnAudioStream.
 		s.link.Detach()
+	}
+	// Those goroutines delete their OpenAL source and buffers through
+	// s.render, which stops working the moment the renderer is closed below.
+	// Waiting for them here is what keeps the device's sources and buffers
+	// from being orphaned on every reconnect.
+	drained := make(chan struct{})
+	go func() {
+		s.streamWG.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(destroyDrainTimeout):
+		log.Warn("Destroy: timed out waiting for audio stream goroutines; " +
+			"OpenAL sources and buffers may be released only by CloseDevice")
 	}
 	if s.deviceSource != nil {
 		s.StopSource()
-		s.deviceSource.CaptureCloseDevice()
+		if !s.deviceSource.CaptureCloseDevice() {
+			log.Error("Destroy: closing capture device %q failed",
+				deviceName(s.inputDeviceName))
+		}
 		s.deviceSource = nil
 	}
 	if s.deviceSink != nil {
@@ -417,7 +445,14 @@ func (s *Stream) Destroy() {
 			<-s.renderDone
 			s.contextSink = nil
 		}
-		s.deviceSink.CloseDevice()
+		// alcCloseDevice returns ALC_FALSE and frees nothing while the device
+		// still has contexts, buffers or sources outstanding. Dropping the
+		// handle after that silently leaks the device and every buffer it
+		// owns, which is invisible to the Go GC, so at least report it.
+		if !s.deviceSink.CloseDevice() {
+			log.Error("Destroy: closing playback device %q failed; its OpenAL "+
+				"buffers cannot be reclaimed", deviceName(s.outputDeviceName))
+		}
 		s.deviceSink = nil
 	}
 }
@@ -485,7 +520,9 @@ func (s *Stream) SetMicVolume(change float32, relative bool) {
 }
 
 func (s *Stream) OnAudioStream(e *gumble.AudioStreamEvent) {
+	s.streamWG.Add(1)
 	go func(e *gumble.AudioStreamEvent) {
+		defer s.streamWG.Done()
 		log.Info("audio stream started for user %s", e.User.Name)
 		var source openal.Source
 		var emptyBufs openal.Buffers
