@@ -54,10 +54,12 @@ func (e *AudioListeners) Attach(listener AudioListener) Detacher {
 	if e.head == nil {
 		e.head = item
 	}
-	if e.tail == nil {
-		e.tail = item
-	} else {
+	if e.tail != nil {
 		e.tail.next = item
 	}
+	// tail was previously left pointing at the first item ever attached. Once
+	// anything detached, the next attach linked itself onto a node that was no
+	// longer in the list, so that listener never received audio again.
+	e.tail = item
 	return item
 }
