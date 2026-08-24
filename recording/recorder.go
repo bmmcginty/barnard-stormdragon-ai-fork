@@ -20,6 +20,12 @@ const (
 	FormatOpus = "opus"
 )
 
+// maxQueuedSamples bounds the per-source mix backlog at roughly five seconds
+// of 48 kHz stereo audio. A source that runs further ahead than this is ahead
+// because the encoder stalled, and no amount of retained audio recovers the
+// timeline; keeping the newest is better than growing without bound.
+const maxQueuedSamples = 5 * gumble.AudioSampleRate * gumble.AudioChannels
+
 type Recorder struct {
 	path      string
 	format    string
@@ -188,6 +194,19 @@ func (r *Recorder) Stop() error {
 	return r.err
 }
 
+// appendCapped adds a source's incoming samples to its mix queue, bounded at
+// maxQueuedSamples. Each tick drains one fixed chunk per source, so a stalled
+// encoder leaves a deficit the loop never makes up and the backlog would
+// otherwise grow for as long as the recording ran. The newest audio is kept:
+// discarding it instead would only push the recording further behind.
+func appendCapped(queue []int16, incoming []int16) []int16 {
+	queue = append(queue, incoming...)
+	if len(queue) > maxQueuedSamples {
+		queue = append(queue[:0], queue[len(queue)-maxQueuedSamples:]...)
+	}
+	return queue
+}
+
 func (r *Recorder) run() {
 	defer close(r.done)
 	ticker := time.NewTicker(r.interval)
@@ -203,7 +222,7 @@ func (r *Recorder) run() {
 			r.closeEncoder()
 			return
 		case item := <-r.input:
-			queues[item.source] = append(queues[item.source], item.samples...)
+			queues[item.source] = appendCapped(queues[item.source], item.samples)
 		case <-ticker.C:
 			clear(chunk)
 			for source, buffer := range queues {
